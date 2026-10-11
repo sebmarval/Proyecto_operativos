@@ -28,8 +28,10 @@ public class ProcessControlBlock {
     private BlockReason blockReason;
     private final ThreadControlBlock tcb;
 
-    public ProcessControlBlock(String name, int assignedComputerId, ProcessType type, 
-                               int priority, int memoryRequired, int deadline, int totalInstructions) {
+    public ProcessControlBlock(String name, int assignedComputerId, 
+        ProcessType type, int priority, int memoryRequired, int deadline, 
+        int totalInstructions) 
+    {
         this.id = idCounter++;
         this.name = name;
         this.assignedComputerId = assignedComputerId;
@@ -117,4 +119,5 @@ public class ProcessControlBlock {
     public ThreadControlBlock getTcb() {
         return tcb;
     }
+    // TODO: Implementar metodos de calculo de metricas de rendimiento
 }
