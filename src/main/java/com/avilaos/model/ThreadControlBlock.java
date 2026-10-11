@@ -43,4 +43,5 @@ public class ThreadControlBlock {
     public void setState(ProcessState state) {
         this.state = state;
     }
+    // TODO: Revisar si se requieren registros adicionales de CPU
 }
