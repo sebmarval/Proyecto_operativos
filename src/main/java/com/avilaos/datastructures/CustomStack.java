@@ -2,10 +2,14 @@
  * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
  * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
  */
+/*
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
+ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
+ */
 package com.avilaos.datastructures;
 
 /**
- *
+ * @author SebMarval
  * @author aleja
  */
 public class CustomStack<T> {
@@ -17,14 +21,14 @@ public class CustomStack<T> {
         this.size = 0;
     }
 
-    public synchronized void push(T element) {
+    public void push(T element) {
         StackNode<T> newNode = new StackNode<>(element);
         newNode.setNext(top);
         top = newNode;
         size++;
     }
 
-    public synchronized T pop() {
+    public T pop() {
         if (isEmpty()) {
             return null;
         }
@@ -34,18 +38,18 @@ public class CustomStack<T> {
         return data;
     }
 
-    public synchronized T peek() {
+    public T peek() {
         if (isEmpty()) {
             return null;
         }
         return top.getData();
     }
 
-    public synchronized boolean isEmpty() {
+    public boolean isEmpty() {
         return top == null;
     }
 
-    public synchronized int size() {
+    public int size() {
         return size;
     }
 }
