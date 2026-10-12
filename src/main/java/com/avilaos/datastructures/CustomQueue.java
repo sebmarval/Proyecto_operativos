@@ -5,10 +5,19 @@
 package com.avilaos.datastructures;
 
 /**
+ * Cola FIFO propia (sustituye a java.util.Queue).
+ *
+ * Se usa para la cola de nuevos (admisión en orden de llegada) y para la
+ * cola de procesos bloqueados de cada semáforo simulado.
+ *
+ * IMPORTANTE: sin sincronización interna; la protege quien la usa con
+ * java.util.concurrent.Semaphore (ver docs/ARQUITECTURA.md).
  *
  * @author aleja
+ * @author SebMarval
  */
 public class CustomQueue<T> {
+
     private QueueNode<T> head;
     private QueueNode<T> tail;
     private int size;
@@ -19,19 +28,19 @@ public class CustomQueue<T> {
         this.size = 0;
     }
 
-    public synchronized void enqueue(T element) {
+    public void enqueue(T element) {
         QueueNode<T> newNode = new QueueNode<>(element);
         if (isEmpty()) {
             head = newNode;
-            tail = newNode;
         } else {
             tail.setNext(newNode);
-            tail = newNode;
         }
+        tail = newNode;
         size++;
     }
 
-    public synchronized T dequeue() {
+    /** Extrae el primero; devuelve null si la cola está vacía. */
+    public T dequeue() {
         if (isEmpty()) {
             return null;
         }
@@ -44,41 +53,50 @@ public class CustomQueue<T> {
         return data;
     }
 
-    public synchronized T peek() {
-        if (isEmpty()) {
-            return null;
-        }
-        return head.getData();
+    public T peek() {
+        return isEmpty() ? null : head.getData();
     }
 
-    public synchronized boolean remove(T element) {
-        if (isEmpty()) return false;
-
-        if (head.getData().equals(element)) {
-            dequeue();
-            return true;
-        }
-
+    public boolean remove(T element) {
+        QueueNode<T> previous = null;
         QueueNode<T> current = head;
-        while (current.getNext() != null) {
-            if (current.getNext().getData().equals(element)) {
-                if (current.getNext() == tail) {
-                    tail = current;
+        while (current != null) {
+            T data = current.getData();
+            if (data == element || (data != null && data.equals(element))) {
+                if (previous == null) {
+                    head = current.getNext();
+                } else {
+                    previous.setNext(current.getNext());
                 }
-                current.setNext(current.getNext().getNext());
+                if (current == tail) {
+                    tail = previous;
+                }
                 size--;
                 return true;
             }
+            previous = current;
             current = current.getNext();
         }
         return false;
     }
 
-    public synchronized boolean isEmpty() {
+    /** Copia los elementos en orden FIFO (para la GUI). */
+    public Object[] toArray() {
+        Object[] result = new Object[size];
+        QueueNode<T> current = head;
+        int i = 0;
+        while (current != null) {
+            result[i++] = current.getData();
+            current = current.getNext();
+        }
+        return result;
+    }
+
+    public boolean isEmpty() {
         return head == null;
     }
 
-    public synchronized int size() {
+    public int size() {
         return size;
     }
 }
