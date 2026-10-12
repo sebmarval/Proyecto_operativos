@@ -5,7 +5,7 @@
 package com.avilaos;
 
 /**
- *
+ * @author Alejandro 
  * @author SebMarval
  */
 public class AvilaOS {
