@@ -4,7 +4,7 @@
  */
 package com.avilaos.sync;
 import com.avilaos.model.ProcessControlBlock;
-import com.avilaos.datastructures.QueueNode;
+import com.avilaos.datastructures.CustomQueue;
 import com.avilaos.datastructures.CustomQueue;
 /**
  *

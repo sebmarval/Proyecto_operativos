@@ -18,8 +18,8 @@ package com.avilaos.datastructures;
  */
 public class CustomQueue<T> {
 
-    private QueueNode<T> head;
-    private QueueNode<T> tail;
+    private Node<T> head;
+    private Node<T> tail;
     private int size;
 
     public CustomQueue() {
@@ -29,7 +29,7 @@ public class CustomQueue<T> {
     }
 
     public void enqueue(T element) {
-        QueueNode<T> newNode = new QueueNode<>(element);
+        Node<T> newNode = new Node<>(element);
         if (isEmpty()) {
             head = newNode;
         } else {
@@ -58,8 +58,8 @@ public class CustomQueue<T> {
     }
 
     public boolean remove(T element) {
-        QueueNode<T> previous = null;
-        QueueNode<T> current = head;
+        Node<T> previous = null;
+        Node<T> current = head;
         while (current != null) {
             T data = current.getData();
             if (data == element || (data != null && data.equals(element))) {
@@ -83,7 +83,7 @@ public class CustomQueue<T> {
     /** Copia los elementos en orden FIFO (para la GUI). */
     public Object[] toArray() {
         Object[] result = new Object[size];
-        QueueNode<T> current = head;
+        Node<T> current = head;
         int i = 0;
         while (current != null) {
             result[i++] = current.getData();
