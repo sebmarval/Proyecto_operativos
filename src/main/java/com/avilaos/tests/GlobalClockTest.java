@@ -5,6 +5,7 @@
 package com.avilaos.tests;
 
 import com.avilaos.enums.ProcessType;
+import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.hardware.ClockListener;
 import com.avilaos.hardware.GlobalClock;
 import com.avilaos.kernel.EventLogger;
@@ -104,8 +105,8 @@ public class GlobalClockTest {
 
     /** Dos computadores reales: cada uno termina su proceso en paralelo, en el mismo ciclo. */
     private static void testTwoComputersRunProcesses() throws InterruptedException {
-        Computer pc0 = new Computer(0, 100, EventLogger.SILENT);
-        Computer pc1 = new Computer(1, 100, EventLogger.SILENT);
+        Computer pc0 = new Computer(0, 1024, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
+        Computer pc1 = new Computer(1, 1024, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
         ProcessControlBlock a = new ProcessControlBlock("A", 0, ProcessType.CPU_BOUND, 1, 10, 500, 20);
         ProcessControlBlock b = new ProcessControlBlock("B", 1, ProcessType.CPU_BOUND, 1, 10, 500, 20);
         pc0.submit(a);
@@ -137,8 +138,8 @@ public class GlobalClockTest {
     private static void demoTwoComputers() throws InterruptedException {
         System.out.println();
         System.out.println("=== Demo: 2 computadores, ciclo de 150 ms ===");
-        Computer pc0 = new Computer(0, 64, EventLogger.CONSOLE);
-        Computer pc1 = new Computer(1, 64, EventLogger.CONSOLE);
+        Computer pc0 = new Computer(0, 64, SchedulingPolicy.FCFS, 2, EventLogger.CONSOLE);
+        Computer pc1 = new Computer(1, 64, SchedulingPolicy.FCFS, 2, EventLogger.CONSOLE);  
         pc0.submit(new ProcessControlBlock("Editor", 0, ProcessType.CPU_BOUND, 1, 32, 50, 3));
         ProcessControlBlock io = new ProcessControlBlock("Descarga", 1, ProcessType.IO_BOUND, 1, 16, 50, 3);
         io.configureIO(1, 2);

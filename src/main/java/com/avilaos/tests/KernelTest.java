@@ -7,6 +7,7 @@ package com.avilaos.tests;
 import com.avilaos.enums.BlockReason;
 import com.avilaos.enums.ProcessState;
 import com.avilaos.enums.ProcessType;
+import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.kernel.EventLogger;
 import com.avilaos.model.ProcessControlBlock;
 import com.avilaos.system.Computer;
@@ -35,7 +36,7 @@ public class KernelTest {
 
     /** RAM 100: P1 (60) entra; P2 (60) espera en NEW hasta que P1 termina y libera. */
     private static void testAdmissionByMemory() {
-        Computer pc = new Computer(0, 100, EventLogger.SILENT);
+        Computer pc = new Computer(0, 100, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
         ProcessControlBlock p1 = cpuBound("P1", 0, 60, 3);
         ProcessControlBlock p2 = cpuBound("P2", 0, 60, 2);
         pc.submit(p1);
@@ -63,7 +64,7 @@ public class KernelTest {
 
     /** I/O bound: cada 2 instrucciones pide E/S de 3 ciclos; otro proceso usa la CPU mientras tanto. */
     private static void testIOBound() {
-        Computer pc = new Computer(0, 100, EventLogger.SILENT);
+        Computer pc = new Computer(0, 100, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
         ProcessControlBlock io = new ProcessControlBlock("IO", 0, ProcessType.IO_BOUND, 1, 10, 100, 4);
         io.configureIO(2, 3);
         ProcessControlBlock cpu = cpuBound("CPU", 0, 10, 10);
@@ -85,7 +86,7 @@ public class KernelTest {
 
     /** Un proceso en READY también vence su deadline y libera su RAM. */
     private static void testDeadlineExpiry() {
-        Computer pc = new Computer(0, 100, EventLogger.SILENT);
+        Computer pc = new Computer(0, 100, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
         ProcessControlBlock longJob = cpuBound("largo", 0, 30, 10);
         ProcessControlBlock waiting = new ProcessControlBlock("espera", 0, ProcessType.CPU_BOUND, 1, 40, 2, 5);
         pc.submit(longJob);
@@ -101,7 +102,7 @@ public class KernelTest {
     }
 
     private static void testValidation() {
-        Computer pc = new Computer(0, 100, EventLogger.SILENT);
+        Computer pc = new Computer(0, 100, SchedulingPolicy.FCFS, 2, EventLogger.SILENT);
         check("rechaza proceso de otro computador", throwsIAE(() -> pc.submit(cpuBound("x", 1, 10, 5))));
         check("rechaza proceso más grande que la RAM total", throwsIAE(() -> pc.submit(cpuBound("x", 0, 150, 5))));
     }
@@ -110,7 +111,7 @@ public class KernelTest {
     private static void demoWithLog() {
         System.out.println();
         System.out.println("=== Demo con log de eventos (RAM 50) ===");
-        Computer pc = new Computer(0, 50, EventLogger.CONSOLE);
+        Computer pc = new Computer(0, 50, SchedulingPolicy.FCFS, 2, EventLogger.CONSOLE);
         ProcessControlBlock a = cpuBound("A", 0, 30, 2);
         ProcessControlBlock b = new ProcessControlBlock("B", 0, ProcessType.IO_BOUND, 1, 20, 50, 3);
         b.configureIO(1, 2);
