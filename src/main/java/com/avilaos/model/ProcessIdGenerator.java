@@ -7,7 +7,8 @@ package com.avilaos.model;
 import java.util.concurrent.Semaphore;
 
 /**
- * Genera IDs de proceso únicos en TODO el clúster (no por computador).
+ * Genera IDs de proceso únicos en 
+ * el clúster (no por computador).
  *
  * Varios hilos pueden crear procesos a la vez (la GUI, la carga inicial),
  * así que el contador se protege con un Semaphore de Java (mutex binario).

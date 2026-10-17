@@ -1,0 +1,635 @@
+commit af8b79161af76085b5adeca5233b1ecf62073b2d
+Author: Alejandro0309 <marcano.alejandro@correo.unimet.edu.ve>
+Date:   Fri Oct 16 21:00:11 2026 -0400
+
+    feat: implementa interfaz SchedulingAlgorithm y algoritmos de planificacion (FCFS, RR, EDF, Prioridades)
+
+diff --git a/src/main/java/com/avilaos/kernel/Kernel.java b/src/main/java/com/avilaos/kernel/Kernel.java
+index a811acc..9206155 100644
+--- a/src/main/java/com/avilaos/kernel/Kernel.java
++++ b/src/main/java/com/avilaos/kernel/Kernel.java
+@@ -8,9 +8,12 @@ import com.avilaos.datastructures.CustomLinkedList;
+ import com.avilaos.datastructures.CustomQueue;
+ import com.avilaos.enums.BlockReason;
+ import com.avilaos.enums.ProcessState;
++import com.avilaos.enums.SchedulingPolicy;
+ import com.avilaos.hardware.CPU;
+ import com.avilaos.hardware.RAM;
+ import com.avilaos.model.ProcessControlBlock;
++import com.avilaos.scheduling.SchedulerFactory;
++import com.avilaos.scheduling.SchedulingAlgorithm;
+ import java.util.concurrent.Semaphore;
+ 
+ /**
+@@ -47,13 +50,15 @@ public class Kernel {
+     private int completedCount;
+     private int deadlineMissedCount;
+     private int currentCycle;
++    private SchedulingAlgorithm scheduler;
+ 
+-    public Kernel(int computerId, int ramCapacity, EventLogger logger) {
+-        this.computerId = computerId;
+-        this.ram = new RAM(ramCapacity);
+-        this.cpu = new CPU(computerId);
+-        this.logger = (logger == null) ? EventLogger.SILENT : logger;
+-    }
++    public Kernel(int computerId, int ramCapacity, SchedulingPolicy initialPolicy, int initialQuantum, EventLogger logger) {
++    this.computerId = computerId;
++    this.ram = new RAM(ramCapacity);
++    this.cpu = new CPU(computerId);
++    this.logger = (logger == null) ? EventLogger.SILENT : logger;
++    this.scheduler = SchedulerFactory.create(initialPolicy, initialQuantum);
++}
+ 
+     // ================================================================ creación
+ 
+@@ -135,25 +140,43 @@ public class Kernel {
+             next = newQueue.peek();
+         }
+     }
++    
++ 
+ 
+     // 3 -----------------------------------------------------------------
+     private void scheduleIfNeeded() {
+-        // TODO(Paso 6): consultar a la política si debe expropiar al proceso en ejecución.
+-        if (cpu.isIdle() && !readyQueue.isEmpty()) {
+-            int index = selectNextIndex();
++    ProcessControlBlock running = cpu.getRunning();
++
++    // 1. Revisa si la politica activa exige expropiar al proceso en ejecucion
++    if (running != null && scheduler != null && scheduler.shouldPreempt(running, readyQueue, cpu.getQuantumUsed())) {
++        cpu.release();
++        running.setState(ProcessState.READY);
++        readyQueue.add(running);
++        logger.log(currentCycle, computerId, "P" + running.getId() + " expropiado -> READY");
++    }
++
++    // 2. Si la CPU esta libre, selecciona y despacha al siguiente proceso elegible
++    if (cpu.isIdle() && !readyQueue.isEmpty()) {
++        int index = selectNextIndex();
++        if (index != -1) {
+             ProcessControlBlock next = readyQueue.removeAt(index);
+             cpu.dispatch(next, currentCycle);
+             logger.log(currentCycle, computerId, "P" + next.getId() + " despachado -> RUNNING");
+         }
+     }
++}
+ 
+     /**
+      * Índice del próximo proceso en la cola de listos.
+      * Provisional: FCFS (el primero). En el Paso 6 se delega en SchedulingAlgorithm.
+      */
+     private int selectNextIndex() {
+-        return 0;
++    if (scheduler == null) {
++        return 0; // FCFS por defecto
+     }
++    // Delega la eleccion a la politica activa (FCFS, RR, EDF o Prioridades)
++    return scheduler.selectNextIndex(readyQueue); 
++}
+ 
+     // 5 -----------------------------------------------------------------
+     private void handleAfterExecution() {
+@@ -272,4 +295,14 @@ public class Kernel {
+     public int getCompletedCount()     { return completedCount; }
+     public int getDeadlineMissedCount(){ return deadlineMissedCount; }
+     public int getCurrentCycle()       { return currentCycle; }
++    
++    
++    public void setSchedulingPolicy(SchedulingPolicy policy, int quantum) {
++    lock.acquireUninterruptibly();
++    try {
++        this.scheduler = SchedulerFactory.create(policy, quantum);
++    } finally {
++        lock.release();
++    }
++    }
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/avilaos/scheduling/EDFScheduler.java b/src/main/java/com/avilaos/scheduling/EDFScheduler.java
+new file mode 100644
+index 0000000..b155d08
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/EDFScheduler.java
+@@ -0,0 +1,54 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++/**
++ *
++ * @author aleja
++ */
++public class EDFScheduler implements SchedulingAlgorithm {
++
++    @Override
++    public SchedulingPolicy getPolicy() {
++        return SchedulingPolicy.EDF;
++    }
++
++    @Override
++    public int selectNextIndex(CustomLinkedList<ProcessControlBlock> readyQueue) {
++        if (readyQueue == null || readyQueue.isEmpty()) {
++            return -1;
++        }
++
++        int bestIndex = 0;
++        int minDeadline = readyQueue.get(0).getDeadline();
++
++        for (int i = 1; i < readyQueue.getSize(); i++) {
++            ProcessControlBlock p = readyQueue.get(i);
++            if (p.getDeadline() < minDeadline) {
++                minDeadline = p.getDeadline();
++                bestIndex = i;
++            }
++        }
++        return bestIndex;
++    }
++
++    @Override
++    public boolean shouldPreempt(ProcessControlBlock running,
++                          CustomLinkedList<ProcessControlBlock> readyQueue,
++                          int quantumUsed) {
++        if (running == null || readyQueue == null || readyQueue.isEmpty()) {
++            return false;
++        }
++
++        for (int i = 0; i < readyQueue.getSize(); i++) {
++            if (readyQueue.get(i).getDeadline() < running.getDeadline()) {
++                return true;
++            }
++        }
++        return false;
++    }
++}
+diff --git a/src/main/java/com/avilaos/scheduling/FCFSScheduler.java b/src/main/java/com/avilaos/scheduling/FCFSScheduler.java
+new file mode 100644
+index 0000000..7e8a977
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/FCFSScheduler.java
+@@ -0,0 +1,34 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++/**
++ *
++ * @author aleja
++ */
++public class FCFSScheduler implements SchedulingAlgorithm {
++
++    @Override
++    public SchedulingPolicy getPolicy() {
++        return SchedulingPolicy.FCFS;
++    }
++
++    @Override
++    public int selectNextIndex(CustomLinkedList<ProcessControlBlock> readyQueue) {
++        if (readyQueue == null || readyQueue.isEmpty()) {
++            return -1;
++        }
++        return 0;
++    }
++
++    @Override
++    public boolean shouldPreempt(ProcessControlBlock running,
++                          CustomLinkedList<ProcessControlBlock> readyQueue,
++                          int quantumUsed) {
++        return false;
++    }
++}
+\ No newline at end of file
+diff --git a/src/main/java/com/avilaos/scheduling/PreemptivePriorityScheduler.java b/src/main/java/com/avilaos/scheduling/PreemptivePriorityScheduler.java
+new file mode 100644
+index 0000000..b906575
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/PreemptivePriorityScheduler.java
+@@ -0,0 +1,54 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++/**
++ *
++ * @author aleja
++ */
++public class PreemptivePriorityScheduler implements SchedulingAlgorithm {
++
++    @Override
++    public SchedulingPolicy getPolicy() {
++        return SchedulingPolicy.PREEMPTIVE_PRIORITY;
++    }
++
++    @Override
++    public int selectNextIndex(CustomLinkedList<ProcessControlBlock> readyQueue) {
++        if (readyQueue == null || readyQueue.isEmpty()) {
++            return -1;
++        }
++
++        int bestIndex = 0;
++        int highestPriority = readyQueue.get(0).getPriority();
++
++        for (int i = 1; i < readyQueue.getSize(); i++) {
++            ProcessControlBlock p = readyQueue.get(i);
++            if (p.getPriority() < highestPriority) {
++                highestPriority = p.getPriority();
++                bestIndex = i;
++            }
++        }
++        return bestIndex;
++    }
++
++    @Override
++    public boolean shouldPreempt(ProcessControlBlock running,
++                          CustomLinkedList<ProcessControlBlock> readyQueue,
++                          int quantumUsed) {
++        if (running == null || readyQueue == null || readyQueue.isEmpty()) {
++            return false;
++        }
++
++        for (int i = 0; i < readyQueue.getSize(); i++) {
++            if (readyQueue.get(i).getPriority() < running.getPriority()) {
++                return true;
++            }
++        }
++        return false;
++    }
++}
+diff --git a/src/main/java/com/avilaos/scheduling/RoundRobinScheduler.java b/src/main/java/com/avilaos/scheduling/RoundRobinScheduler.java
+new file mode 100644
+index 0000000..4e7938b
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/RoundRobinScheduler.java
+@@ -0,0 +1,51 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++/**
++ *
++ * @author aleja
++ */
++public class RoundRobinScheduler implements SchedulingAlgorithm {
++
++    private int quantum;
++
++    public RoundRobinScheduler(int quantum) {
++        setQuantum(quantum);
++    }
++
++    public final void setQuantum(int quantum) {
++        if (quantum <= 0) {
++            throw new IllegalArgumentException();
++        }
++        this.quantum = quantum;
++    }
++
++    public int getQuantum() {
++        return quantum;
++    }
++
++    @Override
++    public SchedulingPolicy getPolicy() {
++        return SchedulingPolicy.ROUND_ROBIN;
++    }
++
++    @Override
++    public int selectNextIndex(CustomLinkedList<ProcessControlBlock> readyQueue) {
++        if (readyQueue == null || readyQueue.isEmpty()) {
++            return -1;
++        }
++        return 0;
++    }
++
++    @Override
++    public boolean shouldPreempt(ProcessControlBlock running,
++                          CustomLinkedList<ProcessControlBlock> readyQueue,
++                          int quantumUsed) {
++        return quantumUsed >= quantum && readyQueue != null && !readyQueue.isEmpty();
++    }
++}
+diff --git a/src/main/java/com/avilaos/scheduling/SchedulerFactory.java b/src/main/java/com/avilaos/scheduling/SchedulerFactory.java
+new file mode 100644
+index 0000000..157c1a8
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/SchedulerFactory.java
+@@ -0,0 +1,28 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.enums.SchedulingPolicy;
++
++/**
++ *
++ * @author aleja
++ */
++public final class SchedulerFactory {
++
++    private SchedulerFactory() {
++    }
++
++    public static SchedulingAlgorithm create(SchedulingPolicy policy, int quantum) {
++        if (policy == null) {
++            throw new IllegalArgumentException();
++        }
++        return switch (policy) {
++            case FCFS -> new FCFSScheduler();
++            case ROUND_ROBIN -> new RoundRobinScheduler(quantum);
++            case EDF -> new EDFScheduler();
++            case PREEMPTIVE_PRIORITY -> new PreemptivePriorityScheduler();
++        };
++    }
++}
+diff --git a/src/main/java/com/avilaos/scheduling/SchedulingAlgorithm.java b/src/main/java/com/avilaos/scheduling/SchedulingAlgorithm.java
+new file mode 100644
+index 0000000..cf53706
+--- /dev/null
++++ b/src/main/java/com/avilaos/scheduling/SchedulingAlgorithm.java
+@@ -0,0 +1,22 @@
++/*
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
++ * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
++ */
++package com.avilaos.scheduling;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++/**
++ *
++ * @author aleja
++ */
++public interface SchedulingAlgorithm {
++
++    SchedulingPolicy getPolicy();
++
++    int selectNextIndex(CustomLinkedList<ProcessControlBlock> readyQueue);
++
++    boolean shouldPreempt(ProcessControlBlock running,
++                          CustomLinkedList<ProcessControlBlock> readyQueue,
++                          int quantumUsed);
++}
+\ No newline at end of file
+diff --git a/src/main/java/com/avilaos/system/Computer.java b/src/main/java/com/avilaos/system/Computer.java
+index 69e9386..29e2838 100644
+--- a/src/main/java/com/avilaos/system/Computer.java
++++ b/src/main/java/com/avilaos/system/Computer.java
+@@ -4,6 +4,7 @@
+  */
+ package com.avilaos.system;
+ 
++import com.avilaos.enums.SchedulingPolicy;
+ import com.avilaos.hardware.ClockListener;
+ import com.avilaos.kernel.EventLogger;
+ import com.avilaos.kernel.Kernel;
+@@ -26,12 +27,12 @@ public class Computer implements ClockListener {
+     private final int id;
+     private final Kernel kernel;
+ 
+-    public Computer(int id, int ramCapacity, EventLogger logger) {
++    public Computer(int id, int ramCapacity, SchedulingPolicy initialPolicy, int initialQuantum, EventLogger logger) {
+         if (id < 0) {
+             throw new IllegalArgumentException("El id del computador no puede ser negativo");
+         }
+         this.id = id;
+-        this.kernel = new Kernel(id, ramCapacity, logger);
++        this.kernel = new Kernel(id, ramCapacity, initialPolicy, initialQuantum, logger);
+     }
+ 
+     @Override
+diff --git a/src/main/java/com/avilaos/tests/SchedulingTest.java b/src/main/java/com/avilaos/tests/SchedulingTest.java
+new file mode 100644
+index 0000000..5cd0d6b
+--- /dev/null
++++ b/src/main/java/com/avilaos/tests/SchedulingTest.java
+@@ -0,0 +1,106 @@
++package com.avilaos.tests;
++import com.avilaos.datastructures.CustomLinkedList;
++import com.avilaos.enums.ProcessType;
++import com.avilaos.enums.SchedulingPolicy;
++import com.avilaos.model.ProcessControlBlock;
++import com.avilaos.scheduling.SchedulingAlgorithm;
++import com.avilaos.scheduling.SchedulerFactory;
++
++import java.util.Scanner;
++
++public class SchedulingTest {
++
++    public static void main(String[] args) {
++        Scanner scanner = new Scanner(System.in);
++
++        System.out.println("====================================================");
++        System.out.println("   SIMULADOR INTERACTIVO DE PLANIFICACIÓN - ÁvilaOS");
++        System.out.println("====================================================\n");
++
++        System.out.println("Seleccione la política que desea probar:");
++        System.out.println("1. FCFS (First-Come, First-Served)");
++        System.out.println("2. ROUND_ROBIN (Quantum = 2 ciclos)");
++        System.out.println("3. EDF (Earliest Deadline First)");
++        System.out.println("4. PREEMPTIVE_PRIORITY (Prioridades Expropiativas)");
++        System.out.print("Ingrese opción (1-4): ");
++        
++        int option = scanner.nextInt();
++        SchedulingPolicy policy;
++        int quantum = 2;
++
++        switch (option) {
++            case 1 -> policy = SchedulingPolicy.FCFS;
++            case 2 -> policy = SchedulingPolicy.ROUND_ROBIN;
++            case 3 -> policy = SchedulingPolicy.EDF;
++            case 4 -> policy = SchedulingPolicy.PREEMPTIVE_PRIORITY;
++            default -> {
++                System.out.println("Opción no válida. Se usará Round Robin por defecto.");
++                policy = SchedulingPolicy.ROUND_ROBIN;
++            }
++        }
++
++        SchedulingAlgorithm scheduler = SchedulerFactory.create(policy, quantum);
++        CustomLinkedList<ProcessControlBlock> readyQueue = new CustomLinkedList<>();
++
++        ProcessControlBlock p1 = new ProcessControlBlock("P1-Largo", 0, ProcessType.CPU_BOUND, 3, 128, 30, 5);
++        ProcessControlBlock p2 = new ProcessControlBlock("P2-Urgente", 0, ProcessType.CPU_BOUND, 1, 64, 8, 3);
++        ProcessControlBlock p3 = new ProcessControlBlock("P3-Medio", 0, ProcessType.CPU_BOUND, 2, 256, 15, 4);
++
++        readyQueue.add(p1);
++        readyQueue.add(p2);
++        readyQueue.add(p3);
++
++        System.out.println("\n----------------------------------------------------");
++        System.out.println("EJECUTANDO POLÍTICA: " + scheduler.getPolicy() + (policy == SchedulingPolicy.ROUND_ROBIN ? " (Quantum=" + quantum + ")" : ""));
++        System.out.println("----------------------------------------------------");
++
++        ProcessControlBlock running = null;
++        int quantumUsed = 0;
++        int currentCycle = 0;
++
++        while (running != null || !readyQueue.isEmpty()) {
++            currentCycle++;
++            System.out.println("\n[CICLO DE RELOJ #" + currentCycle + "]");
++
++            if (running == null) {
++                int selectedIndex = scheduler.selectNextIndex(readyQueue);
++                if (selectedIndex != -1) {
++                    running = readyQueue.removeAt(selectedIndex);
++                    running.setState(com.avilaos.enums.ProcessState.RUNNING);
++                    quantumUsed = 0;
++                    System.out.println(" -> DESPACHO: " + running.getName() + " sale de Listos y pasa a CPU.");
++                }
++            }
++
++            if (running != null) {
++                running.executeInstruction();
++                quantumUsed++;
++                System.out.println(" -> CPU: Ejecutando " + running.getName() + " | Inst. Restantes: " + running.getRemainingTime() + " | Quantum usado: " + quantumUsed);
++
++                if (running.isFinished()) {
++                    running.setState(com.avilaos.enums.ProcessState.TERMINATED);
++                    System.out.println(" -> FIN: " + running.getName() + " TERMINÓ y sale del sistema.");
++                    running = null;
++                    quantumUsed = 0;
++                } 
++                else if (scheduler.shouldPreempt(running, readyQueue, quantumUsed)) {
++                    running.setState(com.avilaos.enums.ProcessState.READY);
++                    System.out.println(" -> EXPROPIACIÓN: " + running.getName() + " sale de CPU y regresa a Listos.");
++                    readyQueue.add(running);
++                    running = null;
++                    quantumUsed = 0;
++                }
++            }
++
++            System.out.print(" -> Estado de Cola de Listos: [ ");
++            for (int i = 0; i < readyQueue.getSize(); i++) {
++                System.out.print(readyQueue.get(i).getName() + " ");
++            }
++            System.out.println("]");
++        }
++
++        System.out.println("\n====================================================");
++        System.out.println(" SIMULACIÓN FINALIZADA EN " + currentCycle + " CICLOS.");
++        System.out.println("====================================================");
++    }
++}
+\ No newline at end of file
+
+commit 2b1da7a60550e151e10435705d9d9e851f23cfe8
+Author: Alejandro0309 <marcano.alejandro@correo.unimet.edu.ve>
+Date:   Thu Oct 15 19:08:52 2026 -0400
+
+    refactor: unifica Node<T> en CustomQueue y elimina estructuras obsoletas
+
+diff --git a/src/main/java/com/avilaos/datastructures/CustomQueue.java b/src/main/java/com/avilaos/datastructures/CustomQueue.java
+index d281401..eb44c26 100644
+--- a/src/main/java/com/avilaos/datastructures/CustomQueue.java
++++ b/src/main/java/com/avilaos/datastructures/CustomQueue.java
+@@ -18,8 +18,8 @@ package com.avilaos.datastructures;
+  */
+ public class CustomQueue<T> {
+ 
+-    private QueueNode<T> head;
+-    private QueueNode<T> tail;
++    private Node<T> head;
++    private Node<T> tail;
+     private int size;
+ 
+     public CustomQueue() {
+@@ -29,7 +29,7 @@ public class CustomQueue<T> {
+     }
+ 
+     public void enqueue(T element) {
+-        QueueNode<T> newNode = new QueueNode<>(element);
++        Node<T> newNode = new Node<>(element);
+         if (isEmpty()) {
+             head = newNode;
+         } else {
+@@ -58,8 +58,8 @@ public class CustomQueue<T> {
+     }
+ 
+     public boolean remove(T element) {
+-        QueueNode<T> previous = null;
+-        QueueNode<T> current = head;
++        Node<T> previous = null;
++        Node<T> current = head;
+         while (current != null) {
+             T data = current.getData();
+             if (data == element || (data != null && data.equals(element))) {
+@@ -83,7 +83,7 @@ public class CustomQueue<T> {
+     /** Copia los elementos en orden FIFO (para la GUI). */
+     public Object[] toArray() {
+         Object[] result = new Object[size];
+-        QueueNode<T> current = head;
++        Node<T> current = head;
+         int i = 0;
+         while (current != null) {
+             result[i++] = current.getData();
+diff --git a/src/main/java/com/avilaos/datastructures/QueueNode.java b/src/main/java/com/avilaos/datastructures/QueueNode.java
+deleted file mode 100644
+index e239be8..0000000
+--- a/src/main/java/com/avilaos/datastructures/QueueNode.java
++++ /dev/null
+@@ -1,35 +0,0 @@
+-/*
+- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
+- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
+- */
+-package com.avilaos.datastructures;
+-
+-/**
+- *
+- * @author aleja
+- */
+-public class QueueNode<T> {
+-    private T data;
+-    private QueueNode<T> next;
+-
+-    public QueueNode(T data) {
+-        this.data = data;
+-        this.next = null;
+-    }
+-
+-    public T getData() {
+-        return data;
+-    }
+-
+-    public void setData(T data) {
+-        this.data = data;
+-    }
+-
+-    public QueueNode<T> getNext() {
+-        return next;
+-    }
+-
+-    public void setNext(QueueNode<T> next) {
+-        this.next = next;
+-    }
+-}
+diff --git a/src/main/java/com/avilaos/sync/Semaphore.java b/src/main/java/com/avilaos/sync/Semaphore.java
+index 2939f4d..bac99a3 100644
+--- a/src/main/java/com/avilaos/sync/Semaphore.java
++++ b/src/main/java/com/avilaos/sync/Semaphore.java
+@@ -4,7 +4,7 @@
+  */
+ package com.avilaos.sync;
+ import com.avilaos.model.ProcessControlBlock;
+-import com.avilaos.datastructures.QueueNode;
++import com.avilaos.datastructures.CustomQueue;
+ import com.avilaos.datastructures.CustomQueue;
+ /**
+  *
