@@ -4,6 +4,7 @@
  */
 package com.avilaos.system;
 
+import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.hardware.ClockListener;
 import com.avilaos.kernel.EventLogger;
 import com.avilaos.kernel.Kernel;
@@ -26,12 +27,12 @@ public class Computer implements ClockListener {
     private final int id;
     private final Kernel kernel;
 
-    public Computer(int id, int ramCapacity, EventLogger logger) {
+    public Computer(int id, int ramCapacity, SchedulingPolicy initialPolicy, int initialQuantum, EventLogger logger) {
         if (id < 0) {
             throw new IllegalArgumentException("El id del computador no puede ser negativo");
         }
         this.id = id;
-        this.kernel = new Kernel(id, ramCapacity, logger);
+        this.kernel = new Kernel(id, ramCapacity, initialPolicy, initialQuantum, logger);
     }
 
     @Override

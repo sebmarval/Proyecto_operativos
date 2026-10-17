@@ -8,9 +8,12 @@ import com.avilaos.datastructures.CustomLinkedList;
 import com.avilaos.datastructures.CustomQueue;
 import com.avilaos.enums.BlockReason;
 import com.avilaos.enums.ProcessState;
+import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.hardware.CPU;
 import com.avilaos.hardware.RAM;
 import com.avilaos.model.ProcessControlBlock;
+import com.avilaos.scheduling.SchedulerFactory;
+import com.avilaos.scheduling.SchedulingAlgorithm;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -47,13 +50,15 @@ public class Kernel {
     private int completedCount;
     private int deadlineMissedCount;
     private int currentCycle;
+    private SchedulingAlgorithm scheduler;
 
-    public Kernel(int computerId, int ramCapacity, EventLogger logger) {
-        this.computerId = computerId;
-        this.ram = new RAM(ramCapacity);
-        this.cpu = new CPU(computerId);
-        this.logger = (logger == null) ? EventLogger.SILENT : logger;
-    }
+    public Kernel(int computerId, int ramCapacity, SchedulingPolicy initialPolicy, int initialQuantum, EventLogger logger) {
+    this.computerId = computerId;
+    this.ram = new RAM(ramCapacity);
+    this.cpu = new CPU(computerId);
+    this.logger = (logger == null) ? EventLogger.SILENT : logger;
+    this.scheduler = SchedulerFactory.create(initialPolicy, initialQuantum);
+}
 
     // ================================================================ creación
 
@@ -135,25 +140,43 @@ public class Kernel {
             next = newQueue.peek();
         }
     }
+    
+ 
 
     // 3 -----------------------------------------------------------------
     private void scheduleIfNeeded() {
-        // TODO(Paso 6): consultar a la política si debe expropiar al proceso en ejecución.
-        if (cpu.isIdle() && !readyQueue.isEmpty()) {
-            int index = selectNextIndex();
+    ProcessControlBlock running = cpu.getRunning();
+
+    // 1. Revisa si la politica activa exige expropiar al proceso en ejecucion
+    if (running != null && scheduler != null && scheduler.shouldPreempt(running, readyQueue, cpu.getQuantumUsed())) {
+        cpu.release();
+        running.setState(ProcessState.READY);
+        readyQueue.add(running);
+        logger.log(currentCycle, computerId, "P" + running.getId() + " expropiado -> READY");
+    }
+
+    // 2. Si la CPU esta libre, selecciona y despacha al siguiente proceso elegible
+    if (cpu.isIdle() && !readyQueue.isEmpty()) {
+        int index = selectNextIndex();
+        if (index != -1) {
             ProcessControlBlock next = readyQueue.removeAt(index);
             cpu.dispatch(next, currentCycle);
             logger.log(currentCycle, computerId, "P" + next.getId() + " despachado -> RUNNING");
         }
     }
+}
 
     /**
      * Índice del próximo proceso en la cola de listos.
      * Provisional: FCFS (el primero). En el Paso 6 se delega en SchedulingAlgorithm.
      */
     private int selectNextIndex() {
-        return 0;
+    if (scheduler == null) {
+        return 0; // FCFS por defecto
     }
+    // Delega la eleccion a la politica activa (FCFS, RR, EDF o Prioridades)
+    return scheduler.selectNextIndex(readyQueue); 
+}
 
     // 5 -----------------------------------------------------------------
     private void handleAfterExecution() {
@@ -272,4 +295,14 @@ public class Kernel {
     public int getCompletedCount()     { return completedCount; }
     public int getDeadlineMissedCount(){ return deadlineMissedCount; }
     public int getCurrentCycle()       { return currentCycle; }
+    
+    
+    public void setSchedulingPolicy(SchedulingPolicy policy, int quantum) {
+    lock.acquireUninterruptibly();
+    try {
+        this.scheduler = SchedulerFactory.create(policy, quantum);
+    } finally {
+        lock.release();
+    }
+    }
 }
