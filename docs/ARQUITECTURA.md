@@ -1,4 +1,4 @@
-# ÁvilaOS — Contrato de arquitectura (Fase 2)
+# ÁvilaOS — Contrato de arquitectura (fase 2)
 
 Este documento es el acuerdo de diseño entre los integrantes. Todo el código debe respetarlo.
 Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el código.
@@ -7,7 +7,7 @@ Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el códi
 
 | Paquete | Responsabilidad |
 |---|---|
-| `com.avilaos.datastructures` | Estructuras propias (`Node`, `CustomLinkedList`, `CustomQueue`, `CustomStack`). **Sin sincronización interna.** |
+| `com.avilaos.datastructures` | Estructuras propias (`Node`, `CustomLinkedList`, `CustomQueue`, `CustomStack`). |
 | `com.avilaos.enums` | Estados, tipos, políticas, modos y motivos de bloqueo. |
 | `com.avilaos.model` | `ProcessControlBlock`, `ThreadControlBlock`, `ProcessIdGenerator`. |
 | `com.avilaos.hardware` | `RAM`, `CPU`, `ClockListener` (interfaz), `GlobalClock`. |
@@ -72,7 +72,7 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 - Los buffers ocupan RAM en su computador anfitrión.
 - Sin disco, sin memoria virtual, sin particiones (extensible en el Proyecto 2).
 
-## 8. Productor-consumidor (implementación)
+## 8. Productor-consumidor
 
 - El PCB deduce su próxima instrucción del PC (`currentInstruction()`); no se guarda una lista de instrucciones.
 - Instrucción de usuario → `CPU.executeCycle()` (modo usuario). Llamada al sistema →
@@ -83,6 +83,13 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
   (`WakeUpRouter`) y pasa a READY al inicio del ciclo siguiente. Ningún kernel toma el lock de otro:
   no puede haber interbloqueo entre computadores.
 - Orden de locks: kernel → buffer → buzón. Nunca al revés.
+- Cada despertar lleva el ciclo del `semSignal` y se aplica en un ciclo **posterior**: el resultado no depende
+  de qué hilo terminó primero el tick (simulación determinista).
+- **Acceso remoto (D6)**: antes de cada llamada al sistema sobre un buffer de otro computador, el kernel envía
+  la solicitud (1 ciclo de CPU en modo SO, sin avanzar el PC) y el proceso queda BLOCKED por `NETWORK_LATENCY`.
+  La operación se ejecuta `L` ciclos después, al volver a la CPU. Cada operación paga su propia latencia.
+- `Cluster` es el punto de entrada para la GUI y la configuración: computadores, reloj, latencia, buffers
+  (ids únicos, RAM en el anfitrión) y asignación automática (computador con menos procesos vivos; empate → menor id).
 - Si un productor/consumidor muere (deadline) a mitad de su micro-programa, el kernel devuelve lo que
   tenía tomado (mutex s, espacio e o elemento n) para que el buffer no quede trabado.
 
