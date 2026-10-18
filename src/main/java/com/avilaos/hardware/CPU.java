@@ -85,6 +85,23 @@ public class CPU {
         busyLastCycle = true;
     }
 
+    /**
+     * Ejecuta un ciclo en modo SO: una llamada al sistema del proceso actual
+     * (semWait, semSignal, añadir o extraer). Cuenta como 1 instrucción del
+     * proceso: avanza PC/MAR, ocupa la CPU y consume quantum. La semántica de
+     * la operación (bloquear, despertar...) la aplica el kernel.
+     */
+    public void executeKernelInstruction() {
+        if (running == null) {
+            throw new IllegalStateException("No hay proceso para ejecutar una llamada al sistema");
+        }
+        mode = CPUMode.KERNEL_MODE;
+        running.executeInstruction();
+        busyCycles++;
+        quantumUsed++;
+        busyLastCycle = true;
+    }
+
     // ---------------------------------------------------------------- consultas
 
     public boolean isIdle() {
