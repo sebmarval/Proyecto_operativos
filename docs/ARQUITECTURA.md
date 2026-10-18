@@ -18,7 +18,7 @@ Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el códi
 | `com.avilaos.metrics` | Métricas por computador y globales. |
 | `com.avilaos.gui` | Swing. Solo observa y envía órdenes; **no contiene lógica del SO**. |
 
-## 2. Dos tipos de semáforo (pregunta segura en la defensa)
+## 2. Dos tipos de semáforo
 
 | | Semáforo simulado (`SimSemaphore`) | `java.util.concurrent.Semaphore` |
 |---|---|---|
@@ -37,8 +37,9 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
   3. El reloj hace `acquire(N)` sobre `tickDone`, duerme la duración del ciclo (ms, configurable) y repite.
 - Los milisegundos solo definen cuánto dura un tick en tiempo real. **Toda la lógica cuenta ciclos.**
 
-## 4. Qué ocurre en un ciclo de un computador (orden fijo)
+## 4. Qué ocurre en un ciclo de un computador 
 
+0. **Despertares**: los procesos que un `semSignal` despertó en el ciclo anterior pasan de BLOCKED a READY.
 1. **Temporizadores de bloqueo**: E/S y latencia de red descuentan 1 ciclo; los que llegan a 0 pasan a READY.
 2. **Admisión (largo plazo)**: de NEW a READY, en orden de llegada, mientras la RAM alcance.
 3. **Planificación (corto plazo)**: si la CPU está libre, o la política decide expropiar, se despacha.
@@ -47,7 +48,7 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 6. **Deadlines**: todo proceso no terminado del computador descuenta 1; si llega a 0 se termina y libera RAM.
 7. **Métricas** del ciclo (CPU ocupada/ociosa, tiempos de espera).
 
-## 5. Modelo de instrucciones (decisiones D4 y D5)
+## 5. Modelo de instrucciones 
 
 - Toda instrucción tarda 1 ciclo.
 - CPU bound: `totalInstructions` instrucciones de usuario.
@@ -71,7 +72,21 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 - Los buffers ocupan RAM en su computador anfitrión.
 - Sin disco, sin memoria virtual, sin particiones (extensible en el Proyecto 2).
 
-## 8. Convenciones
+## 8. Productor-consumidor (implementación)
+
+- El PCB deduce su próxima instrucción del PC (`currentInstruction()`); no se guarda una lista de instrucciones.
+- Instrucción de usuario → `CPU.executeCycle()` (modo usuario). Llamada al sistema →
+  `CPU.executeKernelInstruction()` (modo SO) + el kernel aplica la semántica sobre el buffer.
+- `semWait` que bloquea: el proceso pasa a BLOCKED con motivo `SEMAPHORE_MUTEX`, `BUFFER_FULL` o `BUFFER_EMPTY`,
+  entra a la cola del semáforo y suelta la CPU en ese mismo ciclo.
+- `semSignal` que despierta: el proceso se entrega al **buzón** del kernel de su computador
+  (`WakeUpRouter`) y pasa a READY al inicio del ciclo siguiente. Ningún kernel toma el lock de otro:
+  no puede haber interbloqueo entre computadores.
+- Orden de locks: kernel → buffer → buzón. Nunca al revés.
+- Si un productor/consumidor muere (deadline) a mitad de su micro-programa, el kernel devuelve lo que
+  tenía tomado (mutex s, espacio e o elemento n) para que el buffer no quede trabado.
+
+## 9. Convenciones
 
 - Código, clases y métodos en inglés; comentarios y documentación en español.
 - Ramas `feat/*`, `fix/*`, `docs/*` desde `develop`; integración solo por PR.
