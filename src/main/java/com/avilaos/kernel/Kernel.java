@@ -56,9 +56,11 @@ public class Kernel {
     private final CustomLinkedList<ProcessControlBlock> terminatedList = new CustomLinkedList<>();
     private final CustomLinkedList<BoundedBuffer> hostedBuffers = new CustomLinkedList<>();
 
-    private final CustomQueue<ProcessControlBlock> wakeUpMailbox = new CustomQueue<>();
+    private final CustomQueue<PendingWakeUp> wakeUpMailbox = new CustomQueue<>();
     private final Semaphore mailboxLock = new Semaphore(1);
     private WakeUpRouter wakeUpRouter;
+
+    private volatile int networkLatency;   // ciclos que bloquea cada acceso a un buffer remoto
 
     private SchedulingAlgorithm scheduler;
     private SchedulingPolicy policy;
@@ -164,15 +166,20 @@ public class Kernel {
     private void processWakeUps() {
         mailboxLock.acquireUninterruptibly();
         try {
-            ProcessControlBlock p = wakeUpMailbox.dequeue();
-            while (p != null) {
+            int pending = wakeUpMailbox.size();
+            for (int k = 0; k < pending; k++) {
+                PendingWakeUp w = wakeUpMailbox.dequeue();
+                if (w.cycle() >= currentCycle) {
+                    wakeUpMailbox.enqueue(w);       // se envió en este mismo ciclo: espera al siguiente
+                    continue;
+                }
+                ProcessControlBlock p = w.process();
                 if (blockedList.remove(p)) {
                     BlockReason reason = p.getBlockReason();
                     p.setState(ProcessState.READY);
                     readyQueue.add(p);
                     logger.log(currentCycle, computerId, "P" + p.getId() + " despertado (" + reason + ") -> READY");
                 }
-                p = wakeUpMailbox.dequeue();
             }
         } finally {
             mailboxLock.release();
@@ -180,17 +187,20 @@ public class Kernel {
     }
 
     /** Buzón de despertares: lo llaman otros computadores (o este mismo). */
-    public void deliverWakeUp(ProcessControlBlock process) {
+    public void deliverWakeUp(ProcessControlBlock process, int cycle) {
         if (process.getAssignedComputerId() != computerId) {
             throw new IllegalArgumentException("P" + process.getId() + " no pertenece al computador " + computerId);
         }
         mailboxLock.acquireUninterruptibly();
         try {
-            wakeUpMailbox.enqueue(process);
+            wakeUpMailbox.enqueue(new PendingWakeUp(process, cycle));
         } finally {
             mailboxLock.release();
         }
     }
+
+    /** Un despertar pendiente y el ciclo en que se produjo el semSignal. */
+    private record PendingWakeUp(ProcessControlBlock process, int cycle) { }
 
     // 1 -----------------------------------------------------------------
     private void updateBlockedTimers() {
@@ -261,8 +271,34 @@ public class Kernel {
             cpu.executeCycle();                 // instrucción de usuario
             return;
         }
+        if (needsNetworkLatency(running)) {
+            requestRemoteAccess(running);       // el acceso remoto espera la latencia primero
+            return;
+        }
         cpu.executeKernelInstruction();         // llamada al sistema: modo SO
+        running.setRemoteAccessReady(false);    // la próxima operación remota vuelve a pagar latencia
         executeSystemCall(running, instruction);
+    }
+
+    /** D6: cada operación sobre un buffer de OTRO computador paga la latencia de red. */
+    private boolean needsNetworkLatency(ProcessControlBlock p) {
+        return networkLatency > 0
+                && p.getBuffer().isRemoteFor(computerId)
+                && !p.isRemoteAccessReady();
+    }
+
+    /**
+     * El kernel envía la solicitud por la red (1 ciclo de CPU en modo SO, sin
+     * avanzar el PC) y el proceso queda BLOCKED por NETWORK_LATENCY. La
+     * operación se ejecuta cuando vuelve a la CPU, 'networkLatency' ciclos después.
+     */
+    private void requestRemoteAccess(ProcessControlBlock p) {
+        cpu.executeKernelOverhead();
+        p.blockFor(BlockReason.NETWORK_LATENCY, networkLatency);
+        p.setRemoteAccessReady(true);
+        logger.log(currentCycle, computerId, "P" + p.getId() + " accede al buffer remoto "
+                + p.getBuffer().getId() + "@PC" + p.getBuffer().getHostComputerId()
+                + " (" + p.currentInstruction() + ") -> BLOCKED NETWORK_LATENCY " + networkLatency + " ciclos");
     }
 
     /** Semántica de una llamada al sistema sobre el buffer del proceso. */
@@ -293,7 +329,7 @@ public class Kernel {
     private void signalAndRoute(BoundedBuffer buffer, SemaphoreType sem) {
         ProcessControlBlock woken = buffer.semSignal(sem);
         if (woken != null) {
-            wakeUpRouter.deliverWakeUp(woken);
+            wakeUpRouter.deliverWakeUp(woken, currentCycle);
         }
     }
 
@@ -307,7 +343,7 @@ public class Kernel {
             cpu.release();
             terminate(running, true, "terminó sus instrucciones");
         } else if (running.getState() == ProcessState.BLOCKED) {
-            cpu.release();                       // se bloqueó en un semáforo
+            cpu.release();                       // se bloqueó en un semáforo o espera la red
             blockedList.add(running);
         } else if (running.needsIO()) {
             cpu.release();
@@ -442,6 +478,29 @@ public class Kernel {
             this.quantum = newQuantum;
             logger.log(currentCycle, computerId, "Política cambiada a " + newPolicy
                     + (newPolicy == SchedulingPolicy.ROUND_ROBIN ? " (quantum " + newQuantum + ")" : ""));
+        } finally {
+            lock.release();
+        }
+    }
+
+    /** Latencia de red en ciclos (0 = sin latencia). */
+    public void setNetworkLatency(int cycles) {
+        if (cycles < 0) {
+            throw new IllegalArgumentException("La latencia de red no puede ser negativa");
+        }
+        this.networkLatency = cycles;
+    }
+
+    public int getNetworkLatency() {
+        return networkLatency;
+    }
+
+    /** Procesos vivos en el computador (nuevos + listos + bloqueados + en CPU). */
+    public int getActiveProcessCount() {
+        lock.acquireUninterruptibly();
+        try {
+            return newQueue.size() + readyQueue.getSize() + blockedList.getSize()
+                    + (cpu.isIdle() ? 0 : 1);
         } finally {
             lock.release();
         }

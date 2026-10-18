@@ -53,6 +53,7 @@ public class ProcessControlBlock {
     private int itemsToProcess;        // elementos que debe producir/consumir
     private int workCycles;            // ciclos de usuario por elemento
     private int itemsProcessed;
+    private boolean remoteAccessReady;  // ya pagó la latencia de la operación remota actual
 
     // ------------------------------------------------ bloqueo temporizado
     private int blockTimer;            // ciclos que faltan para desbloquearse (E/S o latencia)
@@ -171,6 +172,11 @@ public class ProcessControlBlock {
     public void countItemProcessed() {
         itemsProcessed++;
     }
+
+    /** True si ya esperó la latencia de red y puede ejecutar su operación remota. */
+    public boolean isRemoteAccessReady() { return remoteAccessReady; }
+
+    public void setRemoteAccessReady(boolean ready) { this.remoteAccessReady = ready; }
 
     public BoundedBuffer getBuffer() { return buffer; }
     public int getItemsToProcess() { return itemsToProcess; }

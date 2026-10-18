@@ -15,10 +15,13 @@ import com.avilaos.model.ProcessControlBlock;
  * al inicio de su siguiente ciclo. Así ningún hilo toma el lock de otro
  * kernel y no puede haber interbloqueo entre computadores.
  *
+ * 'cycle' es el ciclo en que ocurrió el semSignal: el despertar se aplica
+ * siempre en un ciclo POSTERIOR, sin importar qué hilo terminó primero
+ * (resultado determinista aunque los computadores corran en paralelo).
+ *
  * @author SebMarval
  */
 public interface WakeUpRouter {
 
-    void deliverWakeUp(ProcessControlBlock process);
+    void deliverWakeUp(ProcessControlBlock process, int cycle);
 }
-

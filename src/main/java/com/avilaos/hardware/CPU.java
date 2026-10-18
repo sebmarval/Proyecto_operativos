@@ -102,6 +102,17 @@ public class CPU {
         busyLastCycle = true;
     }
 
+    /**
+     * Ciclo de trabajo del SO que NO es una instrucción del proceso (por
+     * ejemplo, enviar una solicitud de red). Ocupa la CPU en modo SO, pero no
+     * avanza el PC ni consume quantum.
+     */
+    public void executeKernelOverhead() {
+        mode = CPUMode.KERNEL_MODE;
+        busyCycles++;
+        busyLastCycle = true;
+    }
+
     // ---------------------------------------------------------------- consultas
 
     public boolean isIdle() {
