@@ -11,6 +11,7 @@ package com.avilaos;
 public class AvilaOS {
 
     public static void main(String[] args) {
-        System.out.println("Hello World!");
+        javax.swing.SwingUtilities.invokeLater(() -> 
+                new com.avilaos.gui.ConfigFrame().setVisible(true));
     }
 }
