@@ -47,7 +47,7 @@ public final class ConfigValidator {
         if (pc == null) {
             throw new IllegalArgumentException("Computador " + i + ": datos vacíos");
         }
-        range("Computador " + i + " - RAM", pc.ramCapacity, 16, 65536);
+        range("Computador " + i + " - RAM", pc.ramCapacity, 16, 1024);
         range("Computador " + i + " - Quantum", pc.quantum, 1, 100);
         if (parsePolicy(pc.policy) == null) {
             throw new IllegalArgumentException("Computador " + i + ": política inválida '" + pc.policy
