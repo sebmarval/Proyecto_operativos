@@ -129,14 +129,13 @@ public class ConfigFrame extends JFrame {
         }
     }
 
-    // Por ahora solo construye el clúster para comprobar que la configuración funciona.
-    // En el paso de MainFrame aquí se abrirá la ventana principal.
+    // Construye el clúster con la configuración y abre la ventana principal
     private void startSimulation() {
         try {
             SimulationConfig cfg = readConfig();
-            Cluster cluster = ClusterFactory.build(cfg, EventLogger.SILENT);
-            JOptionPane.showMessageDialog(this, "Configuración válida: clúster creado con "
-                    + cluster.getComputerCount() + " computadores.\n(La ventana principal se agrega en el siguiente paso)");
+            Cluster cluster = ClusterFactory.build(cfg, EventLogger.CONSOLE);
+            new MainFrame(cluster).setVisible(true);
+            dispose();
         } catch (IllegalArgumentException ex) {
             showError(ex.getMessage());
         }
