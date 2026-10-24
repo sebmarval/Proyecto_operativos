@@ -25,6 +25,7 @@ public class MainFrame extends JFrame {
     private final Cluster cluster;
     private final MetricsCollector collector;
     private final JTabbedPane tabs = new JTabbedPane();
+    private final SummaryPanel summaryPanel;
     private final ComputerPanel[] computerPanels;
     private final MetricsPanel metricsPanel;
     private final UtilizationChartPanel chartPanel;
@@ -41,6 +42,9 @@ public class MainFrame extends JFrame {
         cluster.setAfterTickObserver(collector);
 
         int n = cluster.getComputerCount();
+        // la primera pestaña muestra todos los computadores a la vez
+        summaryPanel = new SummaryPanel(cluster);
+        tabs.addTab("Resumen (todos)", summaryPanel);
         computerPanels = new ComputerPanel[n];
         for (int i = 0; i < n; i++) {
             computerPanels[i] = new ComputerPanel(cluster.getComputer(i).getKernel());
@@ -74,11 +78,14 @@ public class MainFrame extends JFrame {
 
     private void refresh() {
         globalPanel.refresh();
+        // orden de pestañas: 0 = resumen, 1..n = computadores, n+1 = métricas, n+2 = gráfica
         int selected = tabs.getSelectedIndex();
         int n = computerPanels.length;
-        if (selected < n) {
-            computerPanels[selected].refresh();
-        } else if (selected == n) {
+        if (selected == 0) {
+            summaryPanel.refresh();
+        } else if (selected <= n) {
+            computerPanels[selected - 1].refresh();
+        } else if (selected == n + 1) {
             metricsPanel.refresh();
         } else {
             chartPanel.refresh();
