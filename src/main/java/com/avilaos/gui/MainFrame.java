@@ -1,59 +1,67 @@
 package com.avilaos.gui;
 
+import com.avilaos.metrics.MetricsCollector;
 import com.avilaos.system.Cluster;
 import java.awt.BorderLayout;
-import java.awt.FlowLayout;
+import java.awt.Dimension;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import javax.swing.JButton;
 import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
+import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextArea;
 import javax.swing.Timer;
 
-// Ventana principal: una pestaña por computador. Un Timer de Swing relee todo cada 100 ms.
-// Al abrirse arranca el reloj (provisional: en la pieza del GlobalPanel esto pasa a botones).
+// Ventana principal. Arriba, pestañas: una por computador + métricas + gráfica.
+// Abajo, el panel global (reloj, buffers, log) siempre visible.
+//
+// Un Timer de Swing (hilo de la GUI) relee todo cada 100 ms. Solo se refresca la pestaña
+// visible para no gastar tiempo en las demás. El reloj NO arranca solo: lo inicia el botón
+// Iniciar de GlobalPanel.
 public class MainFrame extends JFrame {
 
     private static final int REFRESH_MS = 100;
 
     private final Cluster cluster;
-    private final ComputerPanel[] panels;
-    private final JLabel cycleLabel = new JLabel("Ciclo actual: 0");
+    private final MetricsCollector collector;
+    private final JTabbedPane tabs = new JTabbedPane();
+    private final ComputerPanel[] computerPanels;
+    private final MetricsPanel metricsPanel;
+    private final UtilizationChartPanel chartPanel;
+    private final GlobalPanel globalPanel;
     private final Timer timer;
 
-    public MainFrame(Cluster cluster) {
+    public MainFrame(Cluster cluster, JTextArea logArea) {
         super("ÁvilaOS - Simulación");
         this.cluster = cluster;
         setDefaultCloseOperation(EXIT_ON_CLOSE);
 
-        int n = cluster.getComputerCount();
-        panels = new ComputerPanel[n];
-        JTabbedPane tabs = new JTabbedPane();
-        for (int i = 0; i < n; i++) {
-            panels[i] = new ComputerPanel(cluster.getComputer(i).getKernel());
-            tabs.addTab("Computador " + i, panels[i]);
-        }
+        // el reloj llama al colector al final de cada ciclo, con todos los computadores quietos
+        collector = new MetricsCollector(cluster);
+        cluster.setAfterTickObserver(collector);
 
-        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        top.add(cycleLabel);
-        JButton addOne = new JButton("Crear proceso aleatorio");
-        JButton addFive = new JButton("Crear 5 aleatorios");
-        addOne.addActionListener(e -> addRandomProcesses(1));
-        addFive.addActionListener(e -> addRandomProcesses(5));
-        top.add(addOne);
-        top.add(addFive);
+        int n = cluster.getComputerCount();
+        computerPanels = new ComputerPanel[n];
+        for (int i = 0; i < n; i++) {
+            computerPanels[i] = new ComputerPanel(cluster.getComputer(i).getKernel());
+            tabs.addTab("Computador " + i, computerPanels[i]);
+        }
+        metricsPanel = new MetricsPanel(collector, n);
+        chartPanel = new UtilizationChartPanel(collector, n);
+        tabs.addTab("Métricas", metricsPanel);
+        tabs.addTab("Gráfica de utilización", chartPanel);
+
+        globalPanel = new GlobalPanel(cluster, logArea);
+        globalPanel.setPreferredSize(new Dimension(0, 270));
+
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tabs, globalPanel);
+        split.setResizeWeight(0.72);
         setLayout(new BorderLayout());
-        add(top, BorderLayout.NORTH);
-        add(tabs, BorderLayout.CENTER);
-        setSize(1150, 780);
+        add(split, BorderLayout.CENTER);
+        setSize(1250, 920);
         setLocationRelativeTo(null);
 
         timer = new Timer(REFRESH_MS, e -> refresh());
-
-        // al cerrar la ventana se detiene el refresco y el reloj del clúster
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
@@ -61,28 +69,19 @@ public class MainFrame extends JFrame {
                 cluster.stop();
             }
         });
-
         timer.start();
-        cluster.start();
-    }
-
-    // Manda procesos al azar al clúster para probar (la GUI solo envía la orden submit)
-    private void addRandomProcesses(int count) {
-        for (int i = 0; i < count; i++) {
-            try {
-                cluster.submit(RandomProcessFactory.create(cluster));
-            } catch (IllegalArgumentException ex) {
-                JOptionPane.showMessageDialog(this, ex.getMessage(),
-                        "No se pudo crear el proceso", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-        }
     }
 
     private void refresh() {
-        cycleLabel.setText("Ciclo actual: " + cluster.getCurrentCycle());
-        for (int i = 0; i < panels.length; i++) {
-            panels[i].refresh();
+        globalPanel.refresh();
+        int selected = tabs.getSelectedIndex();
+        int n = computerPanels.length;
+        if (selected < n) {
+            computerPanels[selected].refresh();
+        } else if (selected == n) {
+            metricsPanel.refresh();
+        } else {
+            chartPanel.refresh();
         }
     }
 }
