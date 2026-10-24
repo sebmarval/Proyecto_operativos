@@ -5,8 +5,10 @@ import java.awt.BorderLayout;
 import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.Timer;
@@ -37,6 +39,12 @@ public class MainFrame extends JFrame {
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         top.add(cycleLabel);
+        JButton addOne = new JButton("Crear proceso aleatorio");
+        JButton addFive = new JButton("Crear 5 aleatorios");
+        addOne.addActionListener(e -> addRandomProcesses(1));
+        addFive.addActionListener(e -> addRandomProcesses(5));
+        top.add(addOne);
+        top.add(addFive);
         setLayout(new BorderLayout());
         add(top, BorderLayout.NORTH);
         add(tabs, BorderLayout.CENTER);
@@ -56,6 +64,19 @@ public class MainFrame extends JFrame {
 
         timer.start();
         cluster.start();
+    }
+
+    // Manda procesos al azar al clúster para probar (la GUI solo envía la orden submit)
+    private void addRandomProcesses(int count) {
+        for (int i = 0; i < count; i++) {
+            try {
+                cluster.submit(RandomProcessFactory.create(cluster));
+            } catch (IllegalArgumentException ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(),
+                        "No se pudo crear el proceso", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+        }
     }
 
     private void refresh() {
