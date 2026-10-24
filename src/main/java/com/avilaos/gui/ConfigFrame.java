@@ -9,7 +9,6 @@ import com.avilaos.config.ProcessConfig;
 import com.avilaos.config.SimulationConfig;
 import com.avilaos.enums.ProcessType;
 import com.avilaos.enums.SchedulingPolicy;
-import com.avilaos.kernel.EventLogger;
 import com.avilaos.system.Cluster;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -24,6 +23,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextArea;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.table.DefaultTableModel;
@@ -129,14 +129,16 @@ public class ConfigFrame extends JFrame {
         }
     }
 
-    // Por ahora solo construye el clúster para comprobar que la configuración funciona.
-    // En el paso de MainFrame aquí se abrirá la ventana principal.
+    // Construye el clúster con la configuración y abre la ventana principal
     private void startSimulation() {
         try {
             SimulationConfig cfg = readConfig();
-            Cluster cluster = ClusterFactory.build(cfg, EventLogger.SILENT);
-            JOptionPane.showMessageDialog(this, "Configuración válida: clúster creado con "
-                    + cluster.getComputerCount() + " computadores.\n(La ventana principal se agrega en el siguiente paso)");
+            // el log de eventos va a un área de texto que mostrará GlobalPanel
+            JTextArea logArea = new JTextArea();
+            logArea.setEditable(false);
+            Cluster cluster = ClusterFactory.build(cfg, new GuiEventLogger(logArea));
+            new MainFrame(cluster, logArea).setVisible(true);
+            dispose();
         } catch (IllegalArgumentException ex) {
             showError(ex.getMessage());
         }

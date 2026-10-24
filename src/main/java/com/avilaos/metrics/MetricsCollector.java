@@ -1,9 +1,5 @@
-/*
- * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
- * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
- */
 package com.avilaos.metrics;
- 
+
 import com.avilaos.enums.ProcessState;
 import com.avilaos.enums.ProcessType;
 import com.avilaos.hardware.ClockListener;
@@ -13,13 +9,13 @@ import com.avilaos.sync.BoundedBuffer;
 import com.avilaos.sync.BufferStatus;
 import com.avilaos.system.Cluster;
 import java.util.concurrent.Semaphore;
- 
+
 // Calcula las métricas al final de cada ciclo y guarda el historial de utilización
 // para la gráfica. Se registra con cluster.setAfterTickObserver(collector).
 public class MetricsCollector implements ClockListener {
- 
+
     public static final int HISTORY_SIZE = 500;
- 
+
     private final Cluster cluster;
     private final double[][] history;   // una fila por computador, circular
     private int next;                   // dónde se escribe la próxima muestra
@@ -27,10 +23,10 @@ public class MetricsCollector implements ClockListener {
     private int lastCycle;
     private ComputerMetrics[] latestComputers;
     private GlobalMetrics latestGlobal;
- 
+
     // onTick corre en el hilo del reloj y la GUI lee desde el hilo de Swing
     private final Semaphore lock = new Semaphore(1);
- 
+
     public MetricsCollector(Cluster cluster) {
         if (cluster == null) {
             throw new IllegalArgumentException("El colector necesita un clúster");
@@ -38,7 +34,7 @@ public class MetricsCollector implements ClockListener {
         this.cluster = cluster;
         this.history = new double[cluster.getComputerCount()][HISTORY_SIZE];
     }
- 
+
     // Lo llama el reloj cuando todos los computadores terminaron el ciclo
     @Override
     public void onTick(int cycle) {
@@ -48,7 +44,7 @@ public class MetricsCollector implements ClockListener {
             computers[i] = computeComputer(i);
         }
         GlobalMetrics global = computeGlobal();
- 
+
         lock.acquireUninterruptibly();
         try {
             for (int i = 0; i < n; i++) {
@@ -65,14 +61,14 @@ public class MetricsCollector implements ClockListener {
             lock.release();
         }
     }
- 
+
     // Métricas de un computador. Los ciclos se sacan del kernel, no del reloj,
     // para que también funcione cuando las pruebas avanzan los computadores a mano.
     public ComputerMetrics computeComputer(int id) {
         Kernel kernel = cluster.getComputer(id).getKernel();
         Stats s = analyze(collect(kernel));
         int cycles = kernel.getCurrentCycle();
- 
+
         int produced = 0;
         int consumed = 0;
         BufferMetrics[] buffers = collectBuffers();
@@ -87,7 +83,7 @@ public class MetricsCollector implements ClockListener {
                 throughput, throughput * 100.0, kernel.getCpu().getUtilizationPercent(),
                 s.avgResponse, s.compliance, s.fairness, s.avgSemaphoreBlocked, produced, consumed);
     }
- 
+
     // Métricas de todo el sistema: junta los procesos de todos los computadores
     public GlobalMetrics computeGlobal() {
         int n = cluster.getComputerCount();
@@ -117,7 +113,7 @@ public class MetricsCollector implements ClockListener {
                 throughput, throughput * 100.0, utilizationSum / n,
                 s.avgResponse, s.compliance, s.fairness, s.avgSemaphoreBlocked, collectBuffers());
     }
- 
+
     // Últimas métricas guardadas. Si aún no hubo ciclos se calculan en el momento.
     public ComputerMetrics getLatestComputerMetrics(int id) {
         lock.acquireUninterruptibly();
@@ -130,7 +126,7 @@ public class MetricsCollector implements ClockListener {
         }
         return computeComputer(id);
     }
- 
+
     public GlobalMetrics getLatestGlobalMetrics() {
         lock.acquireUninterruptibly();
         try {
@@ -142,7 +138,7 @@ public class MetricsCollector implements ClockListener {
         }
         return computeGlobal();
     }
- 
+
     // Copia del historial del computador, de la muestra más vieja a la más nueva
     public double[] getUtilizationHistory(int id) {
         if (id < 0 || id >= history.length) {
@@ -161,7 +157,29 @@ public class MetricsCollector implements ClockListener {
             lock.release();
         }
     }
- 
+
+    // Historial de TODOS los computadores leído en un solo momento (bajo el mismo lock).
+    // La gráfica lo usa para que las líneas de los computadores queden alineadas en el mismo ciclo;
+    // pidiendo getUtilizationHistory(i) uno por uno podría entrar un tick entre una lectura y otra.
+    public record UtilizationSnapshot(int oldestCycle, int latestCycle, double[][] values) {
+    }
+
+    public UtilizationSnapshot getUtilizationSnapshot() {
+        lock.acquireUninterruptibly();
+        try {
+            double[][] copy = new double[history.length][size];
+            int start = (size < HISTORY_SIZE) ? 0 : next;
+            for (int id = 0; id < history.length; id++) {
+                for (int i = 0; i < size; i++) {
+                    copy[id][i] = history[id][(start + i) % HISTORY_SIZE];
+                }
+            }
+            return new UtilizationSnapshot(size == 0 ? 0 : lastCycle - size + 1, lastCycle, copy);
+        } finally {
+            lock.release();
+        }
+    }
+
     public int getLatestCycle() {
         lock.acquireUninterruptibly();
         try {
@@ -170,7 +188,7 @@ public class MetricsCollector implements ClockListener {
             lock.release();
         }
     }
- 
+
     // Las muestras son ciclos seguidos, así que la más vieja se saca restando
     public int getOldestCycle() {
         lock.acquireUninterruptibly();
@@ -180,13 +198,13 @@ public class MetricsCollector implements ClockListener {
             lock.release();
         }
     }
- 
+
     // ---------------------------------------------------------------- auxiliares
- 
+
     private record Stats(int terminated, int onTime, double avgResponse, double compliance,
             double fairness, double avgSemaphoreBlocked) {
     }
- 
+
     // Recorre los procesos una sola vez y saca todos los números
     private static Stats analyze(ProcessControlBlock[] all) {
         int terminated = 0;
@@ -197,7 +215,7 @@ public class MetricsCollector implements ClockListener {
         int sharesN = 0;
         int[] semaphoreBlocked = new int[all.length];
         int semaphoreN = 0;
- 
+
         for (int i = 0; i < all.length; i++) {
             ProcessControlBlock p = all[i];
             if (p.getState() == ProcessState.TERMINATED) {
@@ -225,7 +243,7 @@ public class MetricsCollector implements ClockListener {
                 MetricsCalculator.jainIndex(trim(shares, sharesN)),
                 MetricsCalculator.average(trim(semaphoreBlocked, semaphoreN)));
     }
- 
+
     // Todos los procesos del computador: nuevos, listos, bloqueados, terminados y el que está en CPU
     private static ProcessControlBlock[] collect(Kernel kernel) {
         Object[] a = kernel.getNewSnapshot();
@@ -245,14 +263,14 @@ public class MetricsCollector implements ClockListener {
         }
         return all;
     }
- 
+
     private static int copyInto(ProcessControlBlock[] target, int pos, Object[] source) {
-        for (Object source1 : source) {
-            target[pos++] = (ProcessControlBlock) source1;
+        for (int i = 0; i < source.length; i++) {
+            target[pos++] = (ProcessControlBlock) source[i];
         }
         return pos;
     }
- 
+
     private BufferMetrics[] collectBuffers() {
         Object[] raw = cluster.getBuffersSnapshot();
         BufferMetrics[] result = new BufferMetrics[raw.length];
@@ -263,7 +281,7 @@ public class MetricsCollector implements ClockListener {
         }
         return result;
     }
- 
+
     // Recorta el arreglo a los primeros 'length' elementos
     private static int[] trim(int[] source, int length) {
         int[] result = new int[length];
@@ -272,7 +290,7 @@ public class MetricsCollector implements ClockListener {
         }
         return result;
     }
- 
+
     private static double[] trim(double[] source, int length) {
         double[] result = new double[length];
         for (int i = 0; i < length; i++) {
