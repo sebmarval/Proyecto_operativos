@@ -9,7 +9,6 @@ import com.avilaos.config.ProcessConfig;
 import com.avilaos.config.SimulationConfig;
 import com.avilaos.enums.ProcessType;
 import com.avilaos.enums.SchedulingPolicy;
-import com.avilaos.kernel.EventLogger;
 import com.avilaos.system.Cluster;
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
@@ -24,6 +23,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
+import javax.swing.JTextArea;
 import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.table.DefaultTableModel;
@@ -133,8 +133,11 @@ public class ConfigFrame extends JFrame {
     private void startSimulation() {
         try {
             SimulationConfig cfg = readConfig();
-            Cluster cluster = ClusterFactory.build(cfg, EventLogger.CONSOLE);
-            new MainFrame(cluster).setVisible(true);
+            // el log de eventos va a un área de texto que mostrará GlobalPanel
+            JTextArea logArea = new JTextArea();
+            logArea.setEditable(false);
+            Cluster cluster = ClusterFactory.build(cfg, new GuiEventLogger(logArea));
+            new MainFrame(cluster, logArea).setVisible(true);
             dispose();
         } catch (IllegalArgumentException ex) {
             showError(ex.getMessage());
