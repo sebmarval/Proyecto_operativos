@@ -1,0 +1,29 @@
+{
+  "cycleDurationMs": 300,
+  "networkLatency": 2,
+  "computers": [
+    { "ramCapacity": 96, "policy": "ROUND_ROBIN", "quantum": 3 },
+    { "ramCapacity": 96, "policy": "EDF", "quantum": 3 }
+  ],
+  "buffers": [
+    { "id": "B1", "capacity": 3, "hostComputerId": 0 },
+    { "id": "B2", "capacity": 2, "hostComputerId": 1 },
+    { "id": "B3", "capacity": 2, "hostComputerId": 0 }
+  ],
+  "processes": [
+    { "name": "Editor",     "type": "CPU_BOUND", "computerId": 0,  "priority": 2, "memory": 16, "deadline": 300, "instructions": 25 },
+    { "name": "Compilador", "type": "CPU_BOUND", "computerId": 0,  "priority": 1, "memory": 16, "deadline": 250, "instructions": 30 },
+    { "name": "Vencible",   "type": "CPU_BOUND", "computerId": 0,  "priority": 5, "memory": 8,  "deadline": 12,  "instructions": 40 },
+    { "name": "Render",     "type": "CPU_BOUND", "computerId": 1,  "priority": 3, "memory": 16, "deadline": 120, "instructions": 20 },
+    { "name": "Calculo",    "type": "CPU_BOUND", "computerId": 1,  "priority": 0, "memory": 16, "deadline": 60,  "instructions": 15 },
+    { "name": "Descarga",   "type": "IO_BOUND",  "computerId": -1, "priority": 1, "memory": 16, "deadline": 300, "instructions": 15, "ioEvery": 3, "ioDuration": 4 },
+    { "name": "Backup",     "type": "IO_BOUND",  "computerId": 1,  "priority": 2, "memory": 16, "deadline": 250, "instructions": 12, "ioEvery": 4, "ioDuration": 3 },
+    { "name": "Sensor",     "type": "PRODUCER",  "computerId": 0,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B1", "items": 6, "workCycles": 2 },
+    { "name": "Monitor",    "type": "CONSUMER",  "computerId": 1,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B1", "items": 6, "workCycles": 1 },
+    { "name": "Logger",     "type": "PRODUCER",  "computerId": 0,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B2", "items": 4, "workCycles": 1 },
+    { "name": "Archivo",    "type": "CONSUMER",  "computerId": 1,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B2", "items": 4, "workCycles": 1 },
+    { "name": "ProdLocal",  "type": "PRODUCER",  "computerId": 0,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B3", "items": 4, "workCycles": 1 },
+    { "name": "ConsLocal",  "type": "CONSUMER",  "computerId": 0,  "priority": 1, "memory": 8,  "deadline": 400, "bufferId": "B3", "items": 4, "workCycles": 1 },
+    { "name": "Pesado",     "type": "CPU_BOUND", "computerId": 0,  "priority": 4, "memory": 40, "deadline": 350, "instructions": 10 }
+  ]
+}
