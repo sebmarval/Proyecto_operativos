@@ -147,7 +147,7 @@ public class ProcessDialog extends JDialog {
             int priority = readInt(priorityField, "Prioridad", 0, 99);
             int memory = readInt(memoryField, "Memoria", 1, ramLimit);
             int deadline = readInt(deadlineField, "Deadline", 1, 100000);
-            int computer = selected == 0 ? cluster.pickComputerAutomatically() : selected - 1;
+            int computer = selected == 0 ? cluster.pickComputerAutomatically(memory) : selected - 1;
 
             ProcessControlBlock process;
             if (type == ProcessType.CPU_BOUND) {

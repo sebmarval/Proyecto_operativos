@@ -9,6 +9,7 @@ import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.hardware.ClockListener;
 import com.avilaos.hardware.GlobalClock;
 import com.avilaos.kernel.EventLogger;
+import com.avilaos.kernel.Kernel;
 import com.avilaos.model.ProcessControlBlock;
 import com.avilaos.sync.BoundedBuffer;
 import java.util.concurrent.Semaphore;
@@ -137,20 +138,37 @@ public final class Cluster {
     // ================================================================ procesos
 
     /**
-     * Asignación automática (decisión de diseño): el computador con menos
+     * Asignación automática (decisión de diseño, balanceo de carga): entre los
+     * computadores cuya RAM total alcanza para el proceso, el que tenga menos
      * procesos vivos; en empate, el de menor id.
+     *
+     * @param memoryRequired memoria que pide el proceso
+     * @throws IllegalArgumentException si ningún computador tiene RAM suficiente
      */
-    public int pickComputerAutomatically() {
-        int best = 0;
-        int bestLoad = computers[0].getKernel().getActiveProcessCount();
-        for (int i = 1; i < computers.length; i++) {
-            int load = computers[i].getKernel().getActiveProcessCount();
+    public int pickComputerAutomatically(int memoryRequired) {
+        int best = -1;
+        int bestLoad = Integer.MAX_VALUE;
+        for (int i = 0; i < computers.length; i++) {
+            Kernel kernel = computers[i].getKernel();
+            if (kernel.getRam().getCapacity() < memoryRequired) {
+                continue;                       // nunca podría ser admitido ahí
+            }
+            int load = kernel.getActiveProcessCount();
             if (load < bestLoad) {
                 best = i;
                 bestLoad = load;
             }
         }
+        if (best == -1) {
+            throw new IllegalArgumentException("Ningún computador tiene RAM suficiente para "
+                    + memoryRequired + " unidades de memoria");
+        }
         return best;
+    }
+
+    /** Asignación automática sin considerar memoria (el computador con menos procesos vivos). */
+    public int pickComputerAutomatically() {
+        return pickComputerAutomatically(0);
     }
 
     /** Envía el proceso al computador indicado en su PCB. */
@@ -194,4 +212,3 @@ public final class Cluster {
         return logger;
     }
 }
-
