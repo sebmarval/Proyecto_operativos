@@ -18,14 +18,19 @@ import com.avilaos.model.ProcessControlBlock;
  *  - Contar ciclos ocupados y ociosos (utilización de CPU) y el quantum usado.
  *
  * La CPU NO decide a quién ejecutar: eso lo hace el planificador del kernel,
- * que llama a dispatch() y preempt().
+ * que llama a dispatch() y release().
+ *
+ * Reacciona al reloj (ClockListener): en cada tick, onTick() ejecuta un ciclo
+ * de usuario (o un ciclo ocioso). El kernel la invoca en el paso 4 del ciclo,
+ * después de planificar, porque el orden importa: primero se decide quién
+ * corre y después se ejecuta.
  *
  * Decisión de diseño: el cambio de contexto no consume ciclos (el enunciado no
  * lo pide); despachar y ejecutar ocurren en el mismo ciclo.
  *
  * @author SebMarval
  */
-public class CPU {
+public class CPU implements ClockListener {
 
     private final int computerId;
     private ProcessControlBlock running;
@@ -65,6 +70,12 @@ public class CPU {
         running = null;
         quantumUsed = 0;
         return previous;
+    }
+
+    /** Tick del reloj: ejecuta un ciclo de CPU (instrucción de usuario u ocio). */
+    @Override
+    public void onTick(int cycle) {
+        executeCycle();
     }
 
     /**

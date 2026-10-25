@@ -13,6 +13,7 @@ import com.avilaos.enums.ProcessType;
 import com.avilaos.enums.SchedulingPolicy;
 import com.avilaos.enums.SemaphoreType;
 import com.avilaos.hardware.CPU;
+import com.avilaos.hardware.IODevice;
 import com.avilaos.hardware.RAM;
 import com.avilaos.model.ProcessControlBlock;
 import com.avilaos.scheduling.SchedulerFactory;
@@ -47,6 +48,8 @@ public class Kernel {
     private final int computerId;
     private final RAM ram;
     private final CPU cpu;
+    private final IODevice dma = new IODevice("DMA", BlockReason.IO_WAIT);              // E/S
+    private final IODevice network = new IODevice("Red", BlockReason.NETWORK_LATENCY); // latencia
     private final EventLogger logger;
     private final Semaphore lock = new Semaphore(1);
 
@@ -146,7 +149,7 @@ public class Kernel {
         try {
             currentCycle = cycle;
             processWakeUps();           // 0. despertares por semSignal (del ciclo anterior)
-            updateBlockedTimers();      // 1. E/S y latencia
+            tickDevices();              // 1. DMA (E/S) y red (latencia)
             admitNewProcesses();        // 2. largo plazo
             scheduleIfNeeded();         // 3. corto plazo
             executeInstruction();       // 4. una instrucción (usuario o SO)
@@ -203,18 +206,24 @@ public class Kernel {
     private record PendingWakeUp(ProcessControlBlock process, int cycle) { }
 
     // 1 -----------------------------------------------------------------
-    private void updateBlockedTimers() {
-        int i = 0;
-        while (i < blockedList.getSize()) {
-            ProcessControlBlock p = blockedList.get(i);
-            if (p.hasBlockTimer() && p.tickBlockTimer()) {
-                BlockReason reason = p.getBlockReason();
-                blockedList.removeAt(i);          // no se avanza i: el siguiente ocupó esta posición
+    /**
+     * Los dispositivos (componentes de hardware que reaccionan al reloj) avanzan
+     * un ciclo; el kernel pasa a READY a los procesos cuyo servicio terminó.
+     */
+    private void tickDevices() {
+        wakeFromDevice(dma);
+        wakeFromDevice(network);
+    }
+
+    private void wakeFromDevice(IODevice device) {
+        device.onTick(currentCycle);
+        ProcessControlBlock[] done = device.drainCompleted();
+        for (ProcessControlBlock p : done) {
+            if (blockedList.remove(p)) {
                 p.setState(ProcessState.READY);
                 readyQueue.add(p);
-                logger.log(currentCycle, computerId, "P" + p.getId() + " termina " + reason + " -> READY");
-            } else {
-                i++;
+                logger.log(currentCycle, computerId, "P" + p.getId() + " termina " + device.getReason()
+                        + " (" + device.getName() + ") -> READY");
             }
         }
     }
@@ -263,12 +272,12 @@ public class Kernel {
     private void executeInstruction() {
         ProcessControlBlock running = cpu.getRunning();
         if (running == null) {
-            cpu.executeCycle();                 // ciclo ocioso
+            cpu.onTick(currentCycle);           // ciclo ocioso
             return;
         }
         MicroInstruction instruction = running.currentInstruction();
         if (!instruction.isSystemCall()) {
-            cpu.executeCycle();                 // instrucción de usuario
+            cpu.onTick(currentCycle);           // instrucción de usuario
             return;
         }
         if (needsNetworkLatency(running)) {
@@ -294,7 +303,7 @@ public class Kernel {
      */
     private void requestRemoteAccess(ProcessControlBlock p) {
         cpu.executeKernelOverhead();
-        p.blockFor(BlockReason.NETWORK_LATENCY, networkLatency);
+        network.startService(p, networkLatency);
         p.setRemoteAccessReady(true);
         logger.log(currentCycle, computerId, "P" + p.getId() + " accede al buffer remoto "
                 + p.getBuffer().getId() + "@PC" + p.getBuffer().getHostComputerId()
@@ -347,7 +356,7 @@ public class Kernel {
             blockedList.add(running);
         } else if (running.needsIO()) {
             cpu.release();
-            running.blockFor(BlockReason.IO_WAIT, running.getIoDurationCycles());
+            dma.startService(running, running.getIoDurationCycles());
             blockedList.add(running);
             logger.log(currentCycle, computerId, "P" + running.getId() + " solicita E/S por "
                     + running.getIoDurationCycles() + " ciclos -> BLOCKED");
@@ -394,6 +403,8 @@ public class Kernel {
 
     private void expire(ProcessControlBlock p, boolean holdsMemory) {
         deadlineMissedCount++;
+        dma.cancel(p);                 // si moría esperando un dispositivo, se retira de él
+        network.cancel(p);
         releaseSyncResources(p);
         terminate(p, holdsMemory, "deadline vencido");
     }
@@ -551,6 +562,8 @@ public class Kernel {
     public int getComputerId()                   { return computerId; }
     public RAM getRam()                          { return ram; }
     public CPU getCpu()                          { return cpu; }
+    public IODevice getDma()                     { return dma; }
+    public IODevice getNetworkDevice()           { return network; }
     public int getCompletedCount()               { return completedCount; }
     public int getDeadlineMissedCount()          { return deadlineMissedCount; }
     public int getCurrentCycle()                 { return currentCycle; }

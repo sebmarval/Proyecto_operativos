@@ -1,7 +1,6 @@
-# ÁvilaOS — Contrato de arquitectura (fase 2)
+# ÁvilaOS — Contrato de arquitectura 
 
-Este documento es el acuerdo de diseño entre los integrantes. Todo el código debe respetarlo.
-Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el código.
+Este documento es el acuerdo de diseño
 
 ## 1. Paquetes
 
@@ -10,7 +9,7 @@ Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el códi
 | `com.avilaos.datastructures` | Estructuras propias (`Node`, `CustomLinkedList`, `CustomQueue`, `CustomStack`). |
 | `com.avilaos.enums` | Estados, tipos, políticas, modos y motivos de bloqueo. |
 | `com.avilaos.model` | `ProcessControlBlock`, `ThreadControlBlock`, `ProcessIdGenerator`. |
-| `com.avilaos.hardware` | `RAM`, `CPU`, `ClockListener` (interfaz), `GlobalClock`. |
+| `com.avilaos.hardware` | `RAM`, `CPU`, `IODevice` (DMA y red), `ClockListener` (interfaz), `GlobalClock`, `ClockWorker`. Los componentes de hardware no deciden: obedecen al kernel. |
 | `com.avilaos.kernel` | `Kernel` (colas, admisión, despacho, terminación). |
 | `com.avilaos.scheduling` | `SchedulingAlgorithm` (interfaz) + FCFS, EDF, RoundRobin, PreemptivePriority. |
 | `com.avilaos.sync` | `SimSemaphore` (semáforo **simulado**) y `BoundedBuffer`. |
@@ -30,6 +29,12 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 
 ## 3. Hilos y reloj global
 
+**Componentes que reaccionan al reloj** (todos implementan `ClockListener`):
+`Computer` (lo invoca el reloj en su hilo) → dentro del ciclo, el kernel invoca a sus componentes de
+hardware: `CPU` (paso 4) e `IODevice` "DMA" y "Red" (paso 1). `MetricsCollector` lo invoca el reloj al
+cerrar cada tick. El kernel decide el orden porque importa: primero se planifica y después se ejecuta.
+
+
 - `GlobalClock` es un hilo. Cada `Computer` es otro hilo.
 - Barrera por tick (con Semaphores de Java):
   1. El reloj hace `release()` del semáforo `tickStart` de cada computador.
@@ -40,7 +45,7 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 ## 4. Qué ocurre en un ciclo de un computador 
 
 0. **Despertares**: los procesos que un `semSignal` despertó en el ciclo anterior pasan de BLOCKED a READY.
-1. **Temporizadores de bloqueo**: E/S y latencia de red descuentan 1 ciclo; los que llegan a 0 pasan a READY.
+1. **Dispositivos**: el DMA (E/S) y la interfaz de red (latencia) reciben su tick (`onTick`); el kernel pasa a READY a los procesos cuyo servicio terminó.
 2. **Admisión (largo plazo)**: de NEW a READY, en orden de llegada, mientras la RAM alcance.
 3. **Planificación (corto plazo)**: si la CPU está libre, o la política decide expropiar, se despacha.
 4. **Ejecución**: la CPU ejecuta **1 instrucción** del proceso en ejecución (PC y MAR +1).
