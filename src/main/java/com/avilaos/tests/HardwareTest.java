@@ -4,10 +4,13 @@
  */
 package com.avilaos.tests;
 
+import com.avilaos.enums.BlockReason;
 import com.avilaos.enums.CPUMode;
 import com.avilaos.enums.ProcessState;
 import com.avilaos.enums.ProcessType;
 import com.avilaos.hardware.CPU;
+import com.avilaos.hardware.ClockListener;
+import com.avilaos.hardware.IODevice;
 import com.avilaos.hardware.RAM;
 import com.avilaos.model.ProcessControlBlock;
 
@@ -25,6 +28,8 @@ public class HardwareTest {
     public static void main(String[] args) {
         testRam();
         testCpu();
+        testClockListeners();
+        testIODevice();
         System.out.println("--------------------------------");
         System.out.println("Pruebas OK: " + passed + " | Fallidas: " + failed);
     }
@@ -71,6 +76,39 @@ public class HardwareTest {
         ProcessControlBlock out = cpu.release();
         check("release devuelve el proceso y libera la CPU", out == p && cpu.isIdle() && cpu.getQuantumUsed() == 0);
         check("utilización = 2 ocupados de 3 ciclos", Math.abs(cpu.getUtilizationPercent() - 66.666) < 0.01);
+    }
+
+    /** Enunciado: los componentes que reaccionan al reloj (CPU, DMA) comparten una interfaz común. */
+    private static void testClockListeners() {
+        CPU cpu = new CPU(0);
+        IODevice dma = new IODevice("DMA", BlockReason.IO_WAIT);
+        ClockListener[] hardware = {cpu, dma};      // ambos se manejan con la MISMA interfaz
+        for (ClockListener component : hardware) {
+            component.onTick(1);
+        }
+        check("CPU y DMA implementan ClockListener y reaccionan al tick", cpu.getIdleCycles() == 1);
+    }
+
+    /** El DMA atiende la E/S por su cuenta: cuenta los ciclos y entrega al proceso al terminar. */
+    private static void testIODevice() {
+        IODevice dma = new IODevice("DMA", BlockReason.IO_WAIT);
+        ProcessControlBlock p = new ProcessControlBlock("io", 0, ProcessType.IO_BOUND, 1, 10, 100, 5);
+        dma.startService(p, 3);
+        check("al iniciar la E/S el proceso queda BLOCKED por IO_WAIT",
+                p.getState() == ProcessState.BLOCKED && p.getBlockReason() == BlockReason.IO_WAIT
+                && dma.getPendingCount() == 1);
+        dma.onTick(1);
+        dma.onTick(2);
+        check("antes de 3 ciclos no termina", dma.drainCompleted().length == 0);
+        dma.onTick(3);
+        ProcessControlBlock[] done = dma.drainCompleted();
+        check("a los 3 ciclos entrega el proceso y queda libre",
+                done.length == 1 && done[0] == p && dma.getPendingCount() == 0 && dma.getBusyCycles() == 3);
+
+        ProcessControlBlock q = new ProcessControlBlock("io2", 0, ProcessType.IO_BOUND, 1, 10, 100, 5);
+        dma.startService(q, 5);
+        check("cancel retira una solicitud (proceso que vence su deadline)", dma.cancel(q) && dma.getPendingCount() == 0);
+        check("rechaza duración 0", throwsIAE(() -> dma.startService(q, 0)));
     }
 
     private static boolean throwsIAE(Runnable action) {
