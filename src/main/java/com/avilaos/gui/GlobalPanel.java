@@ -46,7 +46,7 @@ public class GlobalPanel extends JPanel {
     private final JButton startButton = new JButton("Iniciar");
     private final JButton pauseButton = new JButton("Pausar");
     private final JButton resumeButton = new JButton("Reanudar");
-    private final JButton stopButton = new JButton("Detener");
+    private final JButton stopButton = new JButton("Finalizar simulación");
     private final JButton processButton = new JButton("Crear proceso...");
     private final JButton bufferButton = new JButton("Crear buffer...");
     private final JButton randomOneButton = new JButton("Proceso aleatorio");
@@ -131,9 +131,10 @@ public class GlobalPanel extends JPanel {
 
     private void confirmStop() {
         int answer = JOptionPane.showConfirmDialog(this,
-                "Detener es definitivo: el reloj no se puede reiniciar en esta ventana.\n"
-                + "Para otra simulación hay que volver a la configuración. ¿Detener?",
-                "Detener simulación", JOptionPane.YES_NO_OPTION);
+                "Finalizar es definitivo: el reloj no se puede reiniciar en esta ventana.\n"
+                + "Los resultados quedan visibles. Para otra simulación hay que  "
+                + "volver a la configuración. ¿Finalizar?",
+                "Finalizar simulación", JOptionPane.YES_NO_OPTION);
         if (answer == JOptionPane.YES_OPTION) {
             cluster.stop();
             setState(ClockState.DETENIDA);
