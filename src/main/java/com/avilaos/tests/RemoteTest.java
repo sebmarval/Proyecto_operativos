@@ -58,6 +58,13 @@ public class RemoteTest {
         cl.submit(cpu("a", 0));
         cl.submit(cpu("b", 0));
         check("automático elige el computador con menos procesos", cl.pickComputerAutomatically() == 1);
+
+        Cluster mixed = new Cluster(new int[]{256, 64}, SchedulingPolicy.FCFS, 2, 0, 0, EventLogger.SILENT);
+        mixed.submit(cpu("c", 0));
+        check("automático descarta computadores sin RAM suficiente (100 -> PC0 aunque tenga más carga)",
+                mixed.pickComputerAutomatically(100) == 0 && mixed.pickComputerAutomatically(10) == 1);
+        check("automático rechaza si ningún computador tiene RAM suficiente",
+                throwsIAE(() -> mixed.pickComputerAutomatically(500)));
     }
 
     /**
@@ -255,4 +262,3 @@ public class RemoteTest {
         }
     }
 }
-

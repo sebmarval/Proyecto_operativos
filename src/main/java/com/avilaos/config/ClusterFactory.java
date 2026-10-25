@@ -51,7 +51,7 @@ public final class ClusterFactory {
     private static ProcessControlBlock buildProcess(Cluster cluster, ProcessConfig p,
             BufferConfig[] bufferCfg, BoundedBuffer[] buffers) {
         // -1 = automático
-        int computer = p.computerId == -1 ? cluster.pickComputerAutomatically() : p.computerId;
+        int computer = p.computerId == -1 ? cluster.pickComputerAutomatically(p.memory) : p.computerId;
         ProcessType type = ConfigValidator.parseType(p.type);
 
         switch (type) {
@@ -83,3 +83,4 @@ public final class ClusterFactory {
         throw new IllegalArgumentException("El buffer '" + id + "' no existe");
     }
 }
+
