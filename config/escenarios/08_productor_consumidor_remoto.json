@@ -1,0 +1,16 @@
+{
+  "descripcion": "Productor-consumidor REMOTO con latencia de red 5. El buffer B1 está en PC0 junto al productor; el consumidor está en PC1. Cada operación del consumidor sobre el buffer (semWait, extraer, semSignal) paga 5 ciclos BLOQUEADO por NETWORK_LATENCY. Compárese con 07: la misma transferencia tarda bastante más.",
+  "cycleDurationMs": 500,
+  "networkLatency": 5,
+  "computers": [
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [
+    { "id": "B1", "capacity": 2, "hostComputerId": 0 }
+  ],
+  "processes": [
+    { "name": "Productor",       "type": "PRODUCER", "computerId": 0, "priority": 1, "memory": 16, "deadline": 2000, "bufferId": "B1", "items": 4, "workCycles": 1 },
+    { "name": "ConsumidorRemoto","type": "CONSUMER", "computerId": 1, "priority": 1, "memory": 16, "deadline": 2000, "bufferId": "B1", "items": 4, "workCycles": 1 }
+  ]
+}

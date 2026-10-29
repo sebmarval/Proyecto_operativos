@@ -26,6 +26,7 @@ import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
 
 // Ventana de configuración inicial. Aquí no hay lógica del SO: solo arma una
@@ -100,6 +101,7 @@ public class ConfigFrame extends JFrame {
 
     private void loadFromFile() {
         JFileChooser chooser = new JFileChooser(new File("config"));
+        chooser.setFileFilter(new FileNameExtensionFilter("Configuración de ÁvilaOS (*.json)", "json"));
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }

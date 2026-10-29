@@ -1,0 +1,18 @@
+{
+  "descripcion": "Asignación automática (computerId = -1) en 3 computadores. Va al computador con menos procesos vivos ENTRE los que tienen RAM suficiente (empate: el de menor id). Auto1 -> PC0, Auto2 -> PC1, Auto3 -> PC2, Auto4 -> PC0. Grande (200 MB) solo cabe en PC0, aunque PC2 esté menos cargado.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 512, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 128, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 128, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Auto1",  "type": "CPU_BOUND", "computerId": -1, "priority": 1, "memory": 16,  "deadline": 500, "instructions": 8 },
+    { "name": "Auto2",  "type": "CPU_BOUND", "computerId": -1, "priority": 1, "memory": 16,  "deadline": 500, "instructions": 8 },
+    { "name": "Auto3",  "type": "CPU_BOUND", "computerId": -1, "priority": 1, "memory": 16,  "deadline": 500, "instructions": 8 },
+    { "name": "Auto4",  "type": "CPU_BOUND", "computerId": -1, "priority": 1, "memory": 16,  "deadline": 500, "instructions": 8 },
+    { "name": "Grande", "type": "CPU_BOUND", "computerId": -1, "priority": 1, "memory": 200, "deadline": 500, "instructions": 8 }
+  ]
+}

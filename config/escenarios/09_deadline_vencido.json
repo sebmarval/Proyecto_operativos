@@ -1,0 +1,15 @@
+{
+  "descripcion": "Deadlines con FCFS en PC0. Pesado ocupa la CPU 15 ciclos; Apurado (deadline 8) espera en listos y su deadline llega a 0 antes de ejecutarse: termina como INCUMPLIDO y libera su RAM. Holgado (deadline 100) sí cumple. Cargar el mismo caso con EDF (cambiando la política) salva a Apurado.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Pesado",  "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 100, "instructions": 15 },
+    { "name": "Apurado", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 8,   "instructions": 3 },
+    { "name": "Holgado", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 100, "instructions": 3 }
+  ]
+}
