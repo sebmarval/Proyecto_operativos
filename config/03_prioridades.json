@@ -1,0 +1,14 @@
+{
+  "descripcion": "Prioridades apropiativas en PC0 (número menor = más prioridad). Al inicio corre Interactivo (prioridad 0); cada 2 instrucciones se va a E/S y entra Fondo (prioridad 5). Cuando Interactivo vuelve de la E/S, EXPROPIA a Fondo de inmediato, que regresa a listos sin perder su avance.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "PREEMPTIVE_PRIORITY", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "PREEMPTIVE_PRIORITY", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Fondo",       "type": "CPU_BOUND", "computerId": 0, "priority": 5, "memory": 32, "deadline": 500, "instructions": 20 },
+    { "name": "Interactivo", "type": "IO_BOUND",  "computerId": 0, "priority": 0, "memory": 16, "deadline": 500, "instructions": 6, "ioEvery": 2, "ioDuration": 3 }
+  ]
+}

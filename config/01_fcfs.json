@@ -1,0 +1,15 @@
+{
+  "descripcion": "FCFS en PC0. Llegan Largo, Corto y Urgente en ese orden. Se ejecutan en orden de llegada aunque Corto sea más corto y Urgente tenga mejor prioridad: Largo (ciclos 1-10), Corto (11-13), Urgente (14-15). Nunca hay expropiación.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Largo",   "type": "CPU_BOUND", "computerId": 0, "priority": 9, "memory": 32, "deadline": 500, "instructions": 10 },
+    { "name": "Corto",   "type": "CPU_BOUND", "computerId": 0, "priority": 5, "memory": 32, "deadline": 500, "instructions": 3 },
+    { "name": "Urgente", "type": "CPU_BOUND", "computerId": 0, "priority": 0, "memory": 32, "deadline": 500, "instructions": 2 }
+  ]
+}
