@@ -1,16 +1,15 @@
-# ÁvilaOS — Contrato de arquitectura (Fase 2)
+# ÁvilaOS — Contrato de arquitectura 
 
-Este documento es el acuerdo de diseño entre los integrantes. Todo el código debe respetarlo.
-Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el código.
+Este documento es el acuerdo de diseño
 
 ## 1. Paquetes
 
 | Paquete | Responsabilidad |
 |---|---|
-| `com.avilaos.datastructures` | Estructuras propias (`Node`, `CustomLinkedList`, `CustomQueue`, `CustomStack`). **Sin sincronización interna.** |
+| `com.avilaos.datastructures` | Estructuras propias (`Node`, `CustomLinkedList`, `CustomQueue`, `CustomStack`). |
 | `com.avilaos.enums` | Estados, tipos, políticas, modos y motivos de bloqueo. |
 | `com.avilaos.model` | `ProcessControlBlock`, `ThreadControlBlock`, `ProcessIdGenerator`. |
-| `com.avilaos.hardware` | `RAM`, `CPU`, `ClockListener` (interfaz), `GlobalClock`. |
+| `com.avilaos.hardware` | `RAM`, `CPU`, `IODevice` (DMA y red), `ClockListener` (interfaz), `GlobalClock`, `ClockWorker`. Los componentes de hardware no deciden: obedecen al kernel. |
 | `com.avilaos.kernel` | `Kernel` (colas, admisión, despacho, terminación). |
 | `com.avilaos.scheduling` | `SchedulingAlgorithm` (interfaz) + FCFS, EDF, RoundRobin, PreemptivePriority. |
 | `com.avilaos.sync` | `SimSemaphore` (semáforo **simulado**) y `BoundedBuffer`. |
@@ -18,7 +17,7 @@ Si algo aquí cambia, se cambia primero este archivo (en un PR) y luego el códi
 | `com.avilaos.metrics` | Métricas por computador y globales. |
 | `com.avilaos.gui` | Swing. Solo observa y envía órdenes; **no contiene lógica del SO**. |
 
-## 2. Dos tipos de semáforo (pregunta segura en la defensa)
+## 2. Dos tipos de semáforo
 
 | | Semáforo simulado (`SimSemaphore`) | `java.util.concurrent.Semaphore` |
 |---|---|---|
@@ -30,6 +29,12 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 
 ## 3. Hilos y reloj global
 
+**Componentes que reaccionan al reloj** (todos implementan `ClockListener`):
+`Computer` (lo invoca el reloj en su hilo) → dentro del ciclo, el kernel invoca a sus componentes de
+hardware: `CPU` (paso 4) e `IODevice` "DMA" y "Red" (paso 1). `MetricsCollector` lo invoca el reloj al
+cerrar cada tick. El kernel decide el orden porque importa: primero se planifica y después se ejecuta.
+
+
 - `GlobalClock` es un hilo. Cada `Computer` es otro hilo.
 - Barrera por tick (con Semaphores de Java):
   1. El reloj hace `release()` del semáforo `tickStart` de cada computador.
@@ -37,9 +42,10 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
   3. El reloj hace `acquire(N)` sobre `tickDone`, duerme la duración del ciclo (ms, configurable) y repite.
 - Los milisegundos solo definen cuánto dura un tick en tiempo real. **Toda la lógica cuenta ciclos.**
 
-## 4. Qué ocurre en un ciclo de un computador (orden fijo)
+## 4. Qué ocurre en un ciclo de un computador 
 
-1. **Temporizadores de bloqueo**: E/S y latencia de red descuentan 1 ciclo; los que llegan a 0 pasan a READY.
+0. **Despertares**: los procesos que un `semSignal` despertó en el ciclo anterior pasan de BLOCKED a READY.
+1. **Dispositivos**: el DMA (E/S) y la interfaz de red (latencia) reciben su tick (`onTick`); el kernel pasa a READY a los procesos cuyo servicio terminó.
 2. **Admisión (largo plazo)**: de NEW a READY, en orden de llegada, mientras la RAM alcance.
 3. **Planificación (corto plazo)**: si la CPU está libre, o la política decide expropiar, se despacha.
 4. **Ejecución**: la CPU ejecuta **1 instrucción** del proceso en ejecución (PC y MAR +1).
@@ -47,7 +53,7 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 6. **Deadlines**: todo proceso no terminado del computador descuenta 1; si llega a 0 se termina y libera RAM.
 7. **Métricas** del ciclo (CPU ocupada/ociosa, tiempos de espera).
 
-## 5. Modelo de instrucciones (decisiones D4 y D5)
+## 5. Modelo de instrucciones 
 
 - Toda instrucción tarda 1 ciclo.
 - CPU bound: `totalInstructions` instrucciones de usuario.
@@ -71,7 +77,28 @@ No se usa `synchronized`: la exclusión mutua real se hace **solo** con `java.ut
 - Los buffers ocupan RAM en su computador anfitrión.
 - Sin disco, sin memoria virtual, sin particiones (extensible en el Proyecto 2).
 
-## 8. Convenciones
+## 8. Productor-consumidor
+
+- El PCB deduce su próxima instrucción del PC (`currentInstruction()`); no se guarda una lista de instrucciones.
+- Instrucción de usuario → `CPU.executeCycle()` (modo usuario). Llamada al sistema →
+  `CPU.executeKernelInstruction()` (modo SO) + el kernel aplica la semántica sobre el buffer.
+- `semWait` que bloquea: el proceso pasa a BLOCKED con motivo `SEMAPHORE_MUTEX`, `BUFFER_FULL` o `BUFFER_EMPTY`,
+  entra a la cola del semáforo y suelta la CPU en ese mismo ciclo.
+- `semSignal` que despierta: el proceso se entrega al **buzón** del kernel de su computador
+  (`WakeUpRouter`) y pasa a READY al inicio del ciclo siguiente. Ningún kernel toma el lock de otro:
+  no puede haber interbloqueo entre computadores.
+- Orden de locks: kernel → buffer → buzón. Nunca al revés.
+- Cada despertar lleva el ciclo del `semSignal` y se aplica en un ciclo **posterior**: el resultado no depende
+  de qué hilo terminó primero el tick (simulación determinista).
+- **Acceso remoto (D6)**: antes de cada llamada al sistema sobre un buffer de otro computador, el kernel envía
+  la solicitud (1 ciclo de CPU en modo SO, sin avanzar el PC) y el proceso queda BLOCKED por `NETWORK_LATENCY`.
+  La operación se ejecuta `L` ciclos después, al volver a la CPU. Cada operación paga su propia latencia.
+- `Cluster` es el punto de entrada para la GUI y la configuración: computadores, reloj, latencia, buffers
+  (ids únicos, RAM en el anfitrión) y asignación automática (computador con menos procesos vivos; empate → menor id).
+- Si un productor/consumidor muere (deadline) a mitad de su micro-programa, el kernel devuelve lo que
+  tenía tomado (mutex s, espacio e o elemento n) para que el buffer no quede trabado.
+
+## 9. Convenciones
 
 - Código, clases y métodos en inglés; comentarios y documentación en español.
 - Ramas `feat/*`, `fix/*`, `docs/*` desde `develop`; integración solo por PR.

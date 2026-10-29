@@ -1,0 +1,16 @@
+{
+  "descripcion": "Productor-consumidor LOCAL en PC0 (Round Robin q=3), buffer B1 de capacidad 2 alojado en PC0. El productor es rápido (1 ciclo de trabajo) y el consumidor lento (4): el buffer se llena y el productor se bloquea en el semáforo e (BUFFER_FULL) hasta que el consumidor libera un hueco. Al final: producidos = consumidos = 6.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "ROUND_ROBIN", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "ROUND_ROBIN", "quantum": 3 }
+  ],
+  "buffers": [
+    { "id": "B1", "capacity": 2, "hostComputerId": 0 }
+  ],
+  "processes": [
+    { "name": "Productor",  "type": "PRODUCER", "computerId": 0, "priority": 1, "memory": 16, "deadline": 1000, "bufferId": "B1", "items": 6, "workCycles": 1 },
+    { "name": "Consumidor", "type": "CONSUMER", "computerId": 0, "priority": 1, "memory": 16, "deadline": 1000, "bufferId": "B1", "items": 6, "workCycles": 4 }
+  ]
+}

@@ -7,10 +7,18 @@ package com.avilaos.kernel;
 import com.avilaos.datastructures.CustomLinkedList;
 import com.avilaos.datastructures.CustomQueue;
 import com.avilaos.enums.BlockReason;
+import com.avilaos.enums.MicroInstruction;
 import com.avilaos.enums.ProcessState;
+import com.avilaos.enums.ProcessType;
+import com.avilaos.enums.SchedulingPolicy;
+import com.avilaos.enums.SemaphoreType;
 import com.avilaos.hardware.CPU;
+import com.avilaos.hardware.IODevice;
 import com.avilaos.hardware.RAM;
 import com.avilaos.model.ProcessControlBlock;
+import com.avilaos.scheduling.SchedulerFactory;
+import com.avilaos.scheduling.SchedulingAlgorithm;
+import com.avilaos.sync.BoundedBuffer;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -19,23 +27,29 @@ import java.util.concurrent.Semaphore;
  * Responsabilidades:
  *  - Mantener las colas de estados: nuevos, listos, bloqueados y terminados.
  *  - Planificador de largo plazo: admitir de NEW a READY solo si hay RAM.
- *  - Planificador de corto plazo: elegir y despachar al siguiente proceso.
- *  - Atender el fin de cada instrucción: terminar, pedir E/S, vencer deadline.
+ *  - Planificador de corto plazo: elegir, despachar y expropiar según la política.
+ *  - Ejecutar las llamadas al sistema de productores/consumidores
+ *    (semWait, semSignal, añadir, extraer), una por ciclo.
+ *  - Atender el fin de cada instrucción: terminar, pedir E/S, bloquearse, vencer deadline.
  *
- * Concurrencia: las colas las tocan el hilo del computador (cada ciclo) y el
- * hilo de la GUI (crear procesos, leer el estado). Todo acceso pasa por
- * 'lock', un Semaphore de Java binario. Las estructuras propias no tienen
- * sincronización interna, por eso este lock es obligatorio.
+ * Concurrencia (Semaphores de Java):
+ *  - 'lock' protege las colas del kernel (hilo del computador + hilo de la GUI).
+ *  - 'mailboxLock' protege el buzón de despertares, que pueden llenar otros
+ *    computadores. Nunca se toma el lock de otro kernel: no hay interbloqueo.
+ *  Orden de adquisición: lock del kernel -> lock del buffer -> mailboxLock.
  *
  * El orden de lo que ocurre en un ciclo está fijado en docs/ARQUITECTURA.md (sección 4).
  *
  * @author SebMarval
+ * @author aleja
  */
 public class Kernel {
 
     private final int computerId;
     private final RAM ram;
     private final CPU cpu;
+    private final IODevice dma = new IODevice("DMA", BlockReason.IO_WAIT);              // E/S
+    private final IODevice network = new IODevice("Red", BlockReason.NETWORK_LATENCY); // latencia
     private final EventLogger logger;
     private final Semaphore lock = new Semaphore(1);
 
@@ -43,16 +57,32 @@ public class Kernel {
     private final CustomLinkedList<ProcessControlBlock> readyQueue = new CustomLinkedList<>();
     private final CustomLinkedList<ProcessControlBlock> blockedList = new CustomLinkedList<>();
     private final CustomLinkedList<ProcessControlBlock> terminatedList = new CustomLinkedList<>();
+    private final CustomLinkedList<BoundedBuffer> hostedBuffers = new CustomLinkedList<>();
+
+    private final CustomQueue<PendingWakeUp> wakeUpMailbox = new CustomQueue<>();
+    private final Semaphore mailboxLock = new Semaphore(1);
+    private WakeUpRouter wakeUpRouter;
+
+    private volatile int networkLatency;   // ciclos que bloquea cada acceso a un buffer remoto
+
+    private SchedulingAlgorithm scheduler;
+    private SchedulingPolicy policy;
+    private int quantum;
 
     private int completedCount;
     private int deadlineMissedCount;
     private int currentCycle;
 
-    public Kernel(int computerId, int ramCapacity, EventLogger logger) {
+    public Kernel(int computerId, int ramCapacity, SchedulingPolicy initialPolicy,
+            int initialQuantum, EventLogger logger) {
         this.computerId = computerId;
         this.ram = new RAM(ramCapacity);
         this.cpu = new CPU(computerId);
         this.logger = (logger == null) ? EventLogger.SILENT : logger;
+        this.scheduler = SchedulerFactory.create(initialPolicy, initialQuantum);
+        this.policy = initialPolicy;
+        this.quantum = initialQuantum;
+        this.wakeUpRouter = this::deliverWakeUp;   // por defecto: solo procesos propios
     }
 
     // ================================================================ creación
@@ -61,8 +91,8 @@ public class Kernel {
      * Recibe un proceso nuevo (desde la GUI o la carga inicial) y lo deja en la
      * cola de nuevos. No reserva RAM: eso ocurre en la admisión.
      *
-     * @throws IllegalArgumentException si el proceso es de otro computador o
-     *         pide más memoria que la RAM total (nunca podría ser admitido)
+     * @throws IllegalArgumentException si el proceso es de otro computador,
+     *         pide más memoria que la RAM total o es productor/consumidor sin buffer
      */
     public void submit(ProcessControlBlock process) {
         if (process.getAssignedComputerId() != computerId) {
@@ -73,11 +103,39 @@ public class Kernel {
             throw new IllegalArgumentException("P" + process.getId() + " pide "
                     + process.getMemoryRequired() + " de memoria y la RAM total es " + ram.getCapacity());
         }
+        if (process.isSyncProcess() && process.getBuffer() == null) {
+            throw new IllegalArgumentException("P" + process.getId() + " es " + process.getType()
+                    + " y no tiene buffer asignado");
+        }
         lock.acquireUninterruptibly();
         try {
             process.markArrival(currentCycle);
             newQueue.enqueue(process);
             logger.log(currentCycle, computerId, "P" + process.getId() + " (" + process.getName() + ") creado -> NEW");
+        } finally {
+            lock.release();
+        }
+    }
+
+    /**
+     * Aloja un buffer en este computador: reserva su memoria en la RAM.
+     *
+     * @throws IllegalArgumentException si el buffer es de otro computador o no hay RAM
+     */
+    public void hostBuffer(BoundedBuffer buffer) {
+        if (buffer.getHostComputerId() != computerId) {
+            throw new IllegalArgumentException("El buffer " + buffer.getId()
+                    + " pertenece al computador " + buffer.getHostComputerId());
+        }
+        lock.acquireUninterruptibly();
+        try {
+            if (!ram.allocate(buffer.getMemoryRequired())) {
+                throw new IllegalArgumentException("RAM insuficiente para el buffer " + buffer.getId()
+                        + " (pide " + buffer.getMemoryRequired() + ", libre " + ram.getFree() + ")");
+            }
+            hostedBuffers.add(buffer);
+            logger.log(currentCycle, computerId, "Buffer " + buffer.getId() + " creado (capacidad "
+                    + buffer.getCapacity() + ", " + ram.getUsed() + "/" + ram.getCapacity() + " RAM)");
         } finally {
             lock.release();
         }
@@ -90,11 +148,12 @@ public class Kernel {
         lock.acquireUninterruptibly();
         try {
             currentCycle = cycle;
-            updateBlockedTimers();      // 1. E/S y latencia
+            processWakeUps();           // 0. despertares por semSignal (del ciclo anterior)
+            tickDevices();              // 1. DMA (E/S) y red (latencia)
             admitNewProcesses();        // 2. largo plazo
             scheduleIfNeeded();         // 3. corto plazo
-            cpu.executeCycle();         // 4. una instrucción
-            handleAfterExecution();     // 5. termina / pide E/S
+            executeInstruction();       // 4. una instrucción (usuario o SO)
+            handleAfterExecution();     // 5. termina / pide E/S / se bloquea
             updateDeadlines();          // 6. deadlines en todos los estados
             accountCycle();             // 7. métricas del ciclo
         } finally {
@@ -102,19 +161,69 @@ public class Kernel {
         }
     }
 
+    // 0 -----------------------------------------------------------------
+    /**
+     * Mueve a READY los procesos despertados por un semSignal. Si el proceso ya
+     * no está bloqueado (p. ej. venció su deadline), el aviso se descarta.
+     */
+    private void processWakeUps() {
+        mailboxLock.acquireUninterruptibly();
+        try {
+            int pending = wakeUpMailbox.size();
+            for (int k = 0; k < pending; k++) {
+                PendingWakeUp w = wakeUpMailbox.dequeue();
+                if (w.cycle() >= currentCycle) {
+                    wakeUpMailbox.enqueue(w);       // se envió en este mismo ciclo: espera al siguiente
+                    continue;
+                }
+                ProcessControlBlock p = w.process();
+                if (blockedList.remove(p)) {
+                    BlockReason reason = p.getBlockReason();
+                    p.setState(ProcessState.READY);
+                    readyQueue.add(p);
+                    logger.log(currentCycle, computerId, "P" + p.getId() + " despertado (" + reason + ") -> READY");
+                }
+            }
+        } finally {
+            mailboxLock.release();
+        }
+    }
+
+    /** Buzón de despertares: lo llaman otros computadores (o este mismo). */
+    public void deliverWakeUp(ProcessControlBlock process, int cycle) {
+        if (process.getAssignedComputerId() != computerId) {
+            throw new IllegalArgumentException("P" + process.getId() + " no pertenece al computador " + computerId);
+        }
+        mailboxLock.acquireUninterruptibly();
+        try {
+            wakeUpMailbox.enqueue(new PendingWakeUp(process, cycle));
+        } finally {
+            mailboxLock.release();
+        }
+    }
+
+    /** Un despertar pendiente y el ciclo en que se produjo el semSignal. */
+    private record PendingWakeUp(ProcessControlBlock process, int cycle) { }
+
     // 1 -----------------------------------------------------------------
-    private void updateBlockedTimers() {
-        int i = 0;
-        while (i < blockedList.getSize()) {
-            ProcessControlBlock p = blockedList.get(i);
-            if (p.hasBlockTimer() && p.tickBlockTimer()) {
-                BlockReason reason = p.getBlockReason();
-                blockedList.removeAt(i);          // no se avanza i: el siguiente ocupó esta posición
+    /**
+     * Los dispositivos (componentes de hardware que reaccionan al reloj) avanzan
+     * un ciclo; el kernel pasa a READY a los procesos cuyo servicio terminó.
+     */
+    private void tickDevices() {
+        wakeFromDevice(dma);
+        wakeFromDevice(network);
+    }
+
+    private void wakeFromDevice(IODevice device) {
+        device.onTick(currentCycle);
+        ProcessControlBlock[] done = device.drainCompleted();
+        for (ProcessControlBlock p : done) {
+            if (blockedList.remove(p)) {
                 p.setState(ProcessState.READY);
                 readyQueue.add(p);
-                logger.log(currentCycle, computerId, "P" + p.getId() + " termina " + reason + " -> READY");
-            } else {
-                i++;
+                logger.log(currentCycle, computerId, "P" + p.getId() + " termina " + device.getReason()
+                        + " (" + device.getName() + ") -> READY");
             }
         }
     }
@@ -138,21 +247,99 @@ public class Kernel {
 
     // 3 -----------------------------------------------------------------
     private void scheduleIfNeeded() {
-        // TODO(Paso 6): consultar a la política si debe expropiar al proceso en ejecución.
+        ProcessControlBlock running = cpu.getRunning();
+
+        // Expropiación: la política activa decide si el proceso en CPU debe salir.
+        if (running != null && scheduler.shouldPreempt(running, readyQueue, cpu.getQuantumUsed())) {
+            cpu.release();
+            running.setState(ProcessState.READY);
+            readyQueue.add(running);
+            logger.log(currentCycle, computerId, "P" + running.getId() + " expropiado (" + policy + ") -> READY");
+        }
+
+        // Despacho: si la CPU está libre, la política elige al siguiente.
         if (cpu.isIdle() && !readyQueue.isEmpty()) {
-            int index = selectNextIndex();
-            ProcessControlBlock next = readyQueue.removeAt(index);
-            cpu.dispatch(next, currentCycle);
-            logger.log(currentCycle, computerId, "P" + next.getId() + " despachado -> RUNNING");
+            int index = scheduler.selectNextIndex(readyQueue);
+            if (index != -1) {
+                ProcessControlBlock next = readyQueue.removeAt(index);
+                cpu.dispatch(next, currentCycle);
+                logger.log(currentCycle, computerId, "P" + next.getId() + " despachado -> RUNNING");
+            }
         }
     }
 
+    // 4 -----------------------------------------------------------------
+    private void executeInstruction() {
+        ProcessControlBlock running = cpu.getRunning();
+        if (running == null) {
+            cpu.onTick(currentCycle);           // ciclo ocioso
+            return;
+        }
+        MicroInstruction instruction = running.currentInstruction();
+        if (!instruction.isSystemCall()) {
+            cpu.onTick(currentCycle);           // instrucción de usuario
+            return;
+        }
+        if (needsNetworkLatency(running)) {
+            requestRemoteAccess(running);       // el acceso remoto espera la latencia primero
+            return;
+        }
+        cpu.executeKernelInstruction();         // llamada al sistema: modo SO
+        running.setRemoteAccessReady(false);    // la próxima operación remota vuelve a pagar latencia
+        executeSystemCall(running, instruction);
+    }
+
+    /** D6: cada operación sobre un buffer de OTRO computador paga la latencia de red. */
+    private boolean needsNetworkLatency(ProcessControlBlock p) {
+        return networkLatency > 0
+                && p.getBuffer().isRemoteFor(computerId)
+                && !p.isRemoteAccessReady();
+    }
+
     /**
-     * Índice del próximo proceso en la cola de listos.
-     * Provisional: FCFS (el primero). En el Paso 6 se delega en SchedulingAlgorithm.
+     * El kernel envía la solicitud por la red (1 ciclo de CPU en modo SO, sin
+     * avanzar el PC) y el proceso queda BLOCKED por NETWORK_LATENCY. La
+     * operación se ejecuta cuando vuelve a la CPU, 'networkLatency' ciclos después.
      */
-    private int selectNextIndex() {
-        return 0;
+    private void requestRemoteAccess(ProcessControlBlock p) {
+        cpu.executeKernelOverhead();
+        network.startService(p, networkLatency);
+        p.setRemoteAccessReady(true);
+        logger.log(currentCycle, computerId, "P" + p.getId() + " accede al buffer remoto "
+                + p.getBuffer().getId() + "@PC" + p.getBuffer().getHostComputerId()
+                + " (" + p.currentInstruction() + ") -> BLOCKED NETWORK_LATENCY " + networkLatency + " ciclos");
+    }
+
+    /** Semántica de una llamada al sistema sobre el buffer del proceso. */
+    private void executeSystemCall(ProcessControlBlock p, MicroInstruction instruction) {
+        BoundedBuffer buffer = p.getBuffer();
+        String who = "P" + p.getId();
+        if (instruction.isWait()) {
+            SemaphoreType sem = instruction.getSemaphore();
+            if (buffer.semWait(sem, p)) {
+                p.block(sem.getBlockReason());  // sale de la CPU en el paso 5
+                logger.log(currentCycle, computerId, who + " semWait(" + buffer.getId() + "." + sem.getSymbol()
+                        + ") -> BLOCKED " + sem.getBlockReason());
+            }
+        } else if (instruction.isSignal()) {
+            signalAndRoute(buffer, instruction.getSemaphore());
+        } else if (instruction == MicroInstruction.ADD_ITEM) {
+            int item = buffer.add();
+            p.countItemProcessed();
+            logger.log(currentCycle, computerId, who + " produce elemento #" + item + " en " + buffer.getId());
+        } else if (instruction == MicroInstruction.REMOVE_ITEM) {
+            int item = buffer.remove();
+            p.countItemProcessed();
+            logger.log(currentCycle, computerId, who + " consume elemento #" + item + " de " + buffer.getId());
+        }
+    }
+
+    /** semSignal + entrega del proceso despertado al kernel de su computador. */
+    private void signalAndRoute(BoundedBuffer buffer, SemaphoreType sem) {
+        ProcessControlBlock woken = buffer.semSignal(sem);
+        if (woken != null) {
+            wakeUpRouter.deliverWakeUp(woken, currentCycle);
+        }
     }
 
     // 5 -----------------------------------------------------------------
@@ -164,9 +351,12 @@ public class Kernel {
         if (running.isFinished()) {
             cpu.release();
             terminate(running, true, "terminó sus instrucciones");
+        } else if (running.getState() == ProcessState.BLOCKED) {
+            cpu.release();                       // se bloqueó en un semáforo o espera la red
+            blockedList.add(running);
         } else if (running.needsIO()) {
             cpu.release();
-            running.blockFor(BlockReason.IO_WAIT, running.getIoDurationCycles());
+            dma.startService(running, running.getIoDurationCycles());
             blockedList.add(running);
             logger.log(currentCycle, computerId, "P" + running.getId() + " solicita E/S por "
                     + running.getIoDurationCycles() + " ciclos -> BLOCKED");
@@ -213,7 +403,53 @@ public class Kernel {
 
     private void expire(ProcessControlBlock p, boolean holdsMemory) {
         deadlineMissedCount++;
+        dma.cancel(p);                 // si moría esperando un dispositivo, se retira de él
+        network.cancel(p);
+        releaseSyncResources(p);
         terminate(p, holdsMemory, "deadline vencido");
+    }
+
+    /**
+     * Un productor/consumidor que muere a mitad de su micro-programa podría
+     * dejar el buffer trabado (por ejemplo, con el mutex s tomado). Aquí se
+     * devuelve todo lo que tenía, según la posición en la que murió.
+     *
+     *  - Si murió esperando en un semáforo, se cancela esa espera.
+     *  - Si tenía el mutex s, se libera.
+     *  - Productor: si reservó espacio (e) y no añadió, lo devuelve;
+     *    si añadió y no avisó (n), avisa.
+     *  - Consumidor: si tomó un elemento (n) y no extrajo, lo devuelve;
+     *    si extrajo y no avisó (e), avisa.
+     */
+    private void releaseSyncResources(ProcessControlBlock p) {
+        if (!p.isSyncProcess() || p.getState() == ProcessState.NEW) {
+            return;
+        }
+        BoundedBuffer buffer = p.getBuffer();
+        int pos = p.positionInItem(p.getProgramCounter());   // próxima instrucción
+        if (buffer.cancelWait(p)) {
+            pos--;                                            // ese semWait queda deshecho
+        }
+        int base = (p.getType() == ProcessType.PRODUCER) ? p.getWorkCycles() : 0;
+        int step = pos - base;   // instrucciones de SO ya completadas en este elemento (0..5)
+
+        boolean holdsMutex = (step == 2 || step == 3);
+        if (holdsMutex) {
+            signalAndRoute(buffer, SemaphoreType.MUTEX);
+        }
+        if (p.getType() == ProcessType.PRODUCER) {
+            if (step == 1 || step == 2) {
+                signalAndRoute(buffer, SemaphoreType.EMPTY);   // devuelve el espacio reservado
+            } else if (step == 3 || step == 4) {
+                signalAndRoute(buffer, SemaphoreType.FULL);    // el elemento ya está: avisa
+            }
+        } else {
+            if (step == 1 || step == 2) {
+                signalAndRoute(buffer, SemaphoreType.FULL);    // devuelve el elemento reservado
+            } else if (step == 3 || step == 4) {
+                signalAndRoute(buffer, SemaphoreType.EMPTY);   // ya extrajo: avisa espacio libre
+            }
+        }
     }
 
     // 7 -----------------------------------------------------------------
@@ -241,12 +477,69 @@ public class Kernel {
         logger.log(currentCycle, computerId, "P" + p.getId() + " " + reason + " -> TERMINATED");
     }
 
+    // ================================================================ política
+
+    /** Cambia la política de planificación en plena ejecución (independiente por computador). */
+    public void setSchedulingPolicy(SchedulingPolicy newPolicy, int newQuantum) {
+        SchedulingAlgorithm created = SchedulerFactory.create(newPolicy, newQuantum); // valida antes de tomar el lock
+        lock.acquireUninterruptibly();
+        try {
+            this.scheduler = created;
+            this.policy = newPolicy;
+            this.quantum = newQuantum;
+            logger.log(currentCycle, computerId, "Política cambiada a " + newPolicy
+                    + (newPolicy == SchedulingPolicy.ROUND_ROBIN ? " (quantum " + newQuantum + ")" : ""));
+        } finally {
+            lock.release();
+        }
+    }
+
+    /** Latencia de red en ciclos (0 = sin latencia). */
+    public void setNetworkLatency(int cycles) {
+        if (cycles < 0) {
+            throw new IllegalArgumentException("La latencia de red no puede ser negativa");
+        }
+        this.networkLatency = cycles;
+    }
+
+    public int getNetworkLatency() {
+        return networkLatency;
+    }
+
+    /** Procesos vivos en el computador (nuevos + listos + bloqueados + en CPU). */
+    public int getActiveProcessCount() {
+        lock.acquireUninterruptibly();
+        try {
+            return newQueue.size() + readyQueue.getSize() + blockedList.getSize()
+                    + (cpu.isIdle() ? 0 : 1);
+        } finally {
+            lock.release();
+        }
+    }
+
+    /** Lo usa el Cluster para que los semSignal remotos lleguen al kernel correcto. */
+    public void setWakeUpRouter(WakeUpRouter router) {
+        if (router == null) {
+            throw new IllegalArgumentException("El router no puede ser null");
+        }
+        this.wakeUpRouter = router;
+    }
+
     // ================================================================ consultas (copias para la GUI)
 
     public Object[] getNewSnapshot()        { return snapshot(newQueue); }
     public Object[] getReadySnapshot()      { return snapshot(readyQueue); }
     public Object[] getBlockedSnapshot()    { return snapshot(blockedList); }
     public Object[] getTerminatedSnapshot() { return snapshot(terminatedList); }
+
+    public Object[] getHostedBuffersSnapshot() {
+        lock.acquireUninterruptibly();
+        try {
+            return hostedBuffers.toArray();
+        } finally {
+            lock.release();
+        }
+    }
 
     private Object[] snapshot(CustomQueue<ProcessControlBlock> queue) {
         lock.acquireUninterruptibly();
@@ -266,10 +559,14 @@ public class Kernel {
         }
     }
 
-    public int getComputerId()         { return computerId; }
-    public RAM getRam()                { return ram; }
-    public CPU getCpu()                { return cpu; }
-    public int getCompletedCount()     { return completedCount; }
-    public int getDeadlineMissedCount(){ return deadlineMissedCount; }
-    public int getCurrentCycle()       { return currentCycle; }
+    public int getComputerId()                   { return computerId; }
+    public RAM getRam()                          { return ram; }
+    public CPU getCpu()                          { return cpu; }
+    public IODevice getDma()                     { return dma; }
+    public IODevice getNetworkDevice()           { return network; }
+    public int getCompletedCount()               { return completedCount; }
+    public int getDeadlineMissedCount()          { return deadlineMissedCount; }
+    public int getCurrentCycle()                 { return currentCycle; }
+    public SchedulingPolicy getSchedulingPolicy(){ return policy; }
+    public int getQuantum()                      { return quantum; }
 }

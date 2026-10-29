@@ -1,0 +1,15 @@
+{
+  "descripcion": "Planificador de largo plazo con poca RAM: PC0 tiene 64 MB y llegan 3 procesos de 32 MB. Los dos primeros pasan a listos; Tercero se queda en NUEVOS (la RAM está llena) hasta que Primero termina y libera memoria. Admisión FIFO estricta.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 64,  "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Primero", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 32, "deadline": 500, "instructions": 6 },
+    { "name": "Segundo", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 32, "deadline": 500, "instructions": 6 },
+    { "name": "Tercero", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 32, "deadline": 500, "instructions": 6 }
+  ]
+}

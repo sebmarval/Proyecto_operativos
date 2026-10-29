@@ -1,0 +1,15 @@
+{
+  "descripcion": "EDF en PC0. Los procesos están listados con el deadline más lejano primero, pero EDF siempre ejecuta el de deadline más cercano: Cerca (deadline 10), luego Medio (30), luego Lejos (90). Los tres cumplen su deadline. Compárese cargando 01_fcfs: con FCFS el orden sería el de la lista.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "EDF", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "EDF", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Lejos", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 90, "instructions": 8 },
+    { "name": "Medio", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 30, "instructions": 6 },
+    { "name": "Cerca", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 10, "instructions": 4 }
+  ]
+}

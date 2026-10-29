@@ -1,0 +1,17 @@
+{
+  "cycleDurationMs": 500,
+  "networkLatency": 2,
+  "computers": [
+    { "ramCapacity": 256, "policy": "ROUND_ROBIN", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "EDF", "quantum": 3 }
+  ],
+  "buffers": [
+    { "id": "B1", "capacity": 5, "hostComputerId": 0 }
+  ],
+  "processes": [
+    { "name": "Editor",   "type": "CPU_BOUND", "computerId": 0,  "priority": 2, "memory": 32, "deadline": 200, "instructions": 20 },
+    { "name": "Descarga", "type": "IO_BOUND",  "computerId": -1, "priority": 1, "memory": 16, "deadline": 300, "instructions": 15, "ioEvery": 3, "ioDuration": 4 },
+    { "name": "Sensor",   "type": "PRODUCER",  "computerId": 0,  "priority": 1, "memory": 16, "deadline": 400, "bufferId": "B1", "items": 5, "workCycles": 2 },
+    { "name": "Monitor",  "type": "CONSUMER",  "computerId": 1,  "priority": 1, "memory": 16, "deadline": 400, "bufferId": "B1", "items": 5, "workCycles": 1 }
+  ]
+}

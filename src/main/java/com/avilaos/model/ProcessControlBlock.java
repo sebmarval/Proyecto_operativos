@@ -1,12 +1,16 @@
 /*
+ */
+/*
  * Click nbfs://nbhost/SystemFileSystem/Templates/Licenses/license-default.txt to change this license
  * Click nbfs://nbhost/SystemFileSystem/Templates/Classes/Class.java to edit this template
  */
 package com.avilaos.model;
 
 import com.avilaos.enums.BlockReason;
+import com.avilaos.enums.MicroInstruction;
 import com.avilaos.enums.ProcessState;
 import com.avilaos.enums.ProcessType;
+import com.avilaos.sync.BoundedBuffer;
 
 /**
  * Bloque de control de proceso (PCB).
@@ -44,6 +48,13 @@ public class ProcessControlBlock {
     private int ioDurationCycles;      // la E/S dura M ciclos globales
     private int cyclesSinceLastIO;
 
+    // ------------------------------------------------ productor / consumidor
+    private BoundedBuffer buffer;      // buffer que usa (local o remoto)
+    private int itemsToProcess;        // elementos que debe producir/consumir
+    private int workCycles;            // ciclos de usuario por elemento
+    private int itemsProcessed;
+    private boolean remoteAccessReady;  // ya pagó la latencia de la operación remota actual
+
     // ------------------------------------------------ bloqueo temporizado
     private int blockTimer;            // ciclos que faltan para desbloquearse (E/S o latencia)
 
@@ -74,6 +85,103 @@ public class ProcessControlBlock {
         this.blockReason = BlockReason.NONE;
         this.tcb = new ThreadControlBlock("T-" + this.id);
     }
+
+    // ================================================================ productor / consumidor
+
+    /**
+     * Crea un productor. Sus instrucciones se precalculan (decisión D5):
+     * elementos x (ciclos de trabajo + 5 instrucciones de SO).
+     */
+    public static ProcessControlBlock createProducer(String name, int computerId, int priority,
+            int memoryRequired, int deadline, BoundedBuffer buffer, int items, int workCycles) {
+        return createSyncProcess(ProcessType.PRODUCER, name, computerId, priority, memoryRequired,
+                deadline, buffer, items, workCycles);
+    }
+
+    /** Crea un consumidor (mismo cálculo de instrucciones que el productor). */
+    public static ProcessControlBlock createConsumer(String name, int computerId, int priority,
+            int memoryRequired, int deadline, BoundedBuffer buffer, int items, int workCycles) {
+        return createSyncProcess(ProcessType.CONSUMER, name, computerId, priority, memoryRequired,
+                deadline, buffer, items, workCycles);
+    }
+
+    private static ProcessControlBlock createSyncProcess(ProcessType type, String name, int computerId,
+            int priority, int memoryRequired, int deadline, BoundedBuffer buffer, int items, int workCycles) {
+        if (buffer == null) {
+            throw new IllegalArgumentException("Un " + type + " necesita un buffer");
+        }
+        if (items <= 0) {
+            throw new IllegalArgumentException("La cantidad de elementos debe ser mayor que 0");
+        }
+        if (workCycles <= 0) {
+            throw new IllegalArgumentException("Los ciclos de trabajo por elemento deben ser mayores que 0");
+        }
+        int total = items * (workCycles + MicroInstruction.SYSTEM_OPS_PER_ITEM);
+        ProcessControlBlock p = new ProcessControlBlock(name, computerId, type, priority,
+                memoryRequired, deadline, total);
+        p.buffer = buffer;
+        p.itemsToProcess = items;
+        p.workCycles = workCycles;
+        return p;
+    }
+
+    public boolean isSyncProcess() {
+        return type == ProcessType.PRODUCER || type == ProcessType.CONSUMER;
+    }
+
+    /**
+     * Instrucción que el proceso ejecutará en su próximo ciclo de CPU.
+     * Se deduce del PC: posición dentro del micro-programa de cada elemento.
+     */
+    public MicroInstruction currentInstruction() {
+        if (!isSyncProcess() || isFinished()) {
+            return MicroInstruction.USER_WORK;
+        }
+        return instructionAt(positionInItem(getProgramCounter()));
+    }
+
+    /** Posición (0..k+4) de la instrucción número 'pc' dentro de su elemento. */
+    public int positionInItem(int pc) {
+        return pc % (workCycles + MicroInstruction.SYSTEM_OPS_PER_ITEM);
+    }
+
+    private MicroInstruction instructionAt(int pos) {
+        if (type == ProcessType.PRODUCER) {
+            if (pos < workCycles) {
+                return MicroInstruction.USER_WORK;
+            }
+            return switch (pos - workCycles) {
+                case 0 -> MicroInstruction.WAIT_EMPTY;
+                case 1 -> MicroInstruction.WAIT_MUTEX;
+                case 2 -> MicroInstruction.ADD_ITEM;
+                case 3 -> MicroInstruction.SIGNAL_MUTEX;
+                default -> MicroInstruction.SIGNAL_FULL;
+            };
+        }
+        return switch (pos) {
+            case 0 -> MicroInstruction.WAIT_FULL;
+            case 1 -> MicroInstruction.WAIT_MUTEX;
+            case 2 -> MicroInstruction.REMOVE_ITEM;
+            case 3 -> MicroInstruction.SIGNAL_MUTEX;
+            case 4 -> MicroInstruction.SIGNAL_EMPTY;
+            default -> MicroInstruction.USER_WORK;
+        };
+    }
+
+    /** Lo llama el kernel al ejecutar ADD_ITEM / REMOVE_ITEM. */
+    public void countItemProcessed() {
+        itemsProcessed++;
+    }
+
+    /** True si ya esperó la latencia de red y puede ejecutar su operación remota. */
+    public boolean isRemoteAccessReady() { return remoteAccessReady; }
+
+    public void setRemoteAccessReady(boolean ready) { this.remoteAccessReady = ready; }
+
+    public BoundedBuffer getBuffer() { return buffer; }
+    public int getItemsToProcess() { return itemsToProcess; }
+    public int getItemsProcessed() { return itemsProcessed; }
+    public int getWorkCycles() { return workCycles; }
 
     // ================================================================ E/S
 

@@ -1,0 +1,15 @@
+{
+  "descripcion": "Round Robin con quantum 2 en PC0. Tres procesos de 6 instrucciones se turnan de 2 en 2: A A B B C C A A B B C C A A B B C C. Al agotar el quantum, el proceso vuelve al FINAL de la cola de listos.",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "ROUND_ROBIN", "quantum": 2 },
+    { "ramCapacity": 256, "policy": "ROUND_ROBIN", "quantum": 2 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "A", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 500, "instructions": 6 },
+    { "name": "B", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 500, "instructions": 6 },
+    { "name": "C", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 500, "instructions": 6 }
+  ]
+}

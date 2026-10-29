@@ -1,0 +1,14 @@
+{
+  "descripcion": "E/S por DMA en PC0 (FCFS). Lector hace E/S cada 2 instrucciones y queda BLOQUEADO (IO_WAIT) 5 ciclos; mientras tanto la CPU no se queda ociosa: ejecuta Calculo. Al terminar la E/S, Lector vuelve a listos (al final de la cola).",
+  "cycleDurationMs": 500,
+  "networkLatency": 0,
+  "computers": [
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 },
+    { "ramCapacity": 256, "policy": "FCFS", "quantum": 3 }
+  ],
+  "buffers": [],
+  "processes": [
+    { "name": "Lector",  "type": "IO_BOUND",  "computerId": 0, "priority": 1, "memory": 16, "deadline": 500, "instructions": 6, "ioEvery": 2, "ioDuration": 5 },
+    { "name": "Calculo", "type": "CPU_BOUND", "computerId": 0, "priority": 1, "memory": 16, "deadline": 500, "instructions": 12 }
+  ]
+}
