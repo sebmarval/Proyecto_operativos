@@ -1,0 +1,128 @@
+@startuml actividades_ciclo_reloj
+' ÁvilaOS — Diagrama de actividades: un ciclo del reloj global
+' Fuente editable (PlantUML). Generar imagen:
+'   java -DPLANTUML_LIMIT_SIZE=16384 -jar plantuml.jar -charset UTF-8 actividades_ciclo_reloj.puml
+
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 13
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityBorderColor #444444
+skinparam ActivityDiamondBackgroundColor #FFF7DD
+skinparam PartitionBorderColor #7A9CC6
+skinparam PartitionFontStyle bold
+skinparam NoteBackgroundColor #EEF5FF
+skinparam NoteBorderColor #7A9CC6
+skinparam ArrowColor #333333
+
+title ÁvilaOS — Actividades de un ciclo del reloj global
+
+start
+:Iniciar: hilo del reloj (GlobalClock)
++ un hilo ClockWorker por computador;
+
+repeat
+  partition "Reloj global (hilo GlobalClock)" {
+    if (¿Pausa?) then (sí)
+      :Esperar 50 ms;
+    else (no)
+      :ciclo = ciclo + 1;
+      :tickStart.release() a cada computador;
+      note right
+        Semaphore de Java: el hilo de cada
+        computador estaba bloqueado esperando
+        este permiso. Nadie se adelanta.
+      end note
+    endif
+  }
+
+  fork
+    partition "Kernel de cada computador (su hilo ClockWorker, con el lock del kernel)" {
+      :0. Buzón de despertares:
+      procesos liberados por un semSignal
+      en un ciclo ANTERIOR → READY;
+      :1. DMA y Red reciben onTick():
+      los que terminaron su E/S o su
+      latencia de red → READY;
+      :2. Admisión (largo plazo, FIFO estricto):
+      NEW → READY mientras el primero quepa en la RAM;
+      :3. Planificación (corto plazo):
+      la política decide si expropia (→ READY, al final)
+      y, si la CPU está libre, elige quién pasa a RUNNING;
+    }
+    partition "CPU (una instrucción = un ciclo)" {
+      if (¿Hay proceso en la CPU?) then (no)
+        :Ciclo ocioso (modo SO);
+      elseif (¿Instrucción de usuario?) then (sí)
+        :onTick(): ejecuta 1 instrucción
+        (modo usuario, PC y MAR + 1);
+      elseif (¿Buffer remoto y aún no
+      pagó la latencia de red?) then (sí)
+        :Kernel envía la solicitud de red
+        (1 ciclo en modo SO, el PC no avanza);
+        :Red: BLOCKED por NETWORK_LATENCY
+        durante L ciclos;
+      else (llamada al sistema)
+        :Ejecuta la llamada al sistema
+        (modo SO, PC y MAR + 1);
+        partition "Buffer acotado (Semaphore de Java propio)" {
+          switch (¿Qué operación?)
+          case (semWait)
+            :valor = valor − 1;
+            if (¿valor < 0?) then (sí)
+              :El PCB entra a la cola del semáforo:
+              BLOCKED (SEMAPHORE_MUTEX,
+              BUFFER_FULL o BUFFER_EMPTY);
+            endif
+          case (semSignal)
+            :valor = valor + 1;
+            if (¿valor <= 0?) then (sí)
+              :Saca al primero de la cola (FIFO)
+              y lo deja en el buzón de SU computador;
+            endif
+          case (añadir / extraer)
+            :Inserta o extrae un elemento
+            del arreglo circular;
+          endswitch
+        }
+      endif
+    }
+    partition "Kernel: cierre del ciclo" {
+      :5. Después de ejecutar:
+      terminó → TERMINATED y libera RAM ·
+      quedó bloqueado → cola de bloqueados ·
+      pide E/S → DMA (BLOCKED por IO_WAIT, M ciclos);
+      :6. Deadline − 1 en TODOS los procesos vivos;
+      if (¿Algún deadline llegó a 0?) then (sí)
+        :Devolver s / e / n que tuviera tomados,
+        → TERMINATED (incumplido), liberar RAM;
+      endif
+      :7. Contabilizar métricas del ciclo;
+      :tickDone.release();
+    }
+  fork again
+    :… el mismo ciclo, en paralelo,
+    en cada uno de los demás computadores;
+  end fork
+
+  partition "Reloj global (hilo GlobalClock)" {
+    :tickDone.acquire(N): barrera,
+    espera a que los N computadores terminen;
+    :MetricsCollector.onTick():
+    métricas e historial de la gráfica;
+    :Dormir la duración del ciclo (ms);
+  }
+repeat while (¿Simulación en curso?) is (sí)
+-> no;
+:Detener los hilos de los computadores;
+stop
+
+legend right
+  <b>Dos tipos de semáforo</b>
+  • <b>Semaphore de Java</b> (tickStart, tickDone, locks):
+    sincronizan <b>hilos reales</b>.
+  • <b>s, n, e</b> del buffer (SimSemaphore):
+    simulados, bloquean <b>procesos</b>.
+  Ningún computador empieza el ciclo k+1
+  hasta que todos terminaron el ciclo k.
+endlegend
+@enduml
