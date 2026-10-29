@@ -51,6 +51,14 @@ public class ConfigFrame extends JFrame {
     private final JTable buffersTable = new JTable(buffersModel);
     private final JTable processesTable = new JTable(processesModel);
 
+        // Al volver desde la simulación: abre la configuración con la que se inició
+    public ConfigFrame(SimulationConfig previous) {
+        this();
+        if (previous != null) {
+            fillTables(previous);
+        }
+    }
+    
     public ConfigFrame() {
         super("ÁvilaOS - Configuración");
         setDefaultCloseOperation(EXIT_ON_CLOSE);
