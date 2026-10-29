@@ -11,6 +11,7 @@ import javax.swing.JSplitPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextArea;
 import javax.swing.Timer;
+import com.avilaos.config.SimulationConfig;
 
 // Ventana principal. Arriba, pestañas: una por computador + métricas + gráfica.
 // Abajo, el panel global (reloj, buffers, log) siempre visible.
@@ -32,10 +33,12 @@ public class MainFrame extends JFrame {
     private final GlobalPanel globalPanel;
     private final Timer timer;
 
-    public MainFrame(Cluster cluster, JTextArea logArea) {
-        super("ÁvilaOS - Simulación");
-        this.cluster = cluster;
-        setDefaultCloseOperation(EXIT_ON_CLOSE);
+     public MainFrame(Cluster cluster, JTextArea logArea) {
+        this(cluster, logArea, null);
+    }
+
+    // initialConfig: la configuración con la que se inició, para "Volver a la configuración"
+    public MainFrame(Cluster cluster, JTextArea logArea, SimulationConfig initialConfig) {
 
         // el reloj llama al colector al final de cada ciclo, con todos los computadores quietos
         collector = new MetricsCollector(cluster);
@@ -73,7 +76,17 @@ public class MainFrame extends JFrame {
                 cluster.stop();
             }
         });
+        globalPanel.setOnBackToConfig(() -> backToConfig(initialConfig));
         timer.start();
+    }
+    
+    
+    // Detiene todo (reloj, hilos y refresco) y vuelve a la vista de configuración
+    private void backToConfig(SimulationConfig initialConfig) {
+        timer.stop();
+        cluster.stop();
+        dispose();
+        new ConfigFrame(initialConfig).setVisible(true);
     }
 
     private void refresh() {

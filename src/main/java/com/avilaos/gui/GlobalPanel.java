@@ -47,6 +47,8 @@ public class GlobalPanel extends JPanel {
     private final JButton pauseButton = new JButton("Pausar");
     private final JButton resumeButton = new JButton("Reanudar");
     private final JButton stopButton = new JButton("Finalizar simulación");
+    private final JButton backButton = new JButton("Volver a la configuración");
+    private Runnable onBackToConfig;
     private final JButton processButton = new JButton("Crear proceso...");
     private final JButton bufferButton = new JButton("Crear buffer...");
     private final JButton randomOneButton = new JButton("Proceso aleatorio");
@@ -76,7 +78,9 @@ public class GlobalPanel extends JPanel {
             setState(ClockState.EN_EJECUCION);
         });
         stopButton.addActionListener(e -> confirmStop());
+        backButton.addActionListener(e -> confirmBack());
         JButton speedButton = new JButton("Aplicar");
+        
         speedButton.addActionListener(e -> applySpeed());
         processButton.addActionListener(e ->
                 new ProcessDialog(SwingUtilities.getWindowAncestor(this), cluster).setVisible(true));
@@ -84,7 +88,7 @@ public class GlobalPanel extends JPanel {
                 new BufferDialog(SwingUtilities.getWindowAncestor(this), cluster).setVisible(true));
         randomOneButton.addActionListener(e -> addRandomProcesses(1));
         randomFiveButton.addActionListener(e -> addRandomProcesses(5));
-
+        
         JPanel clockRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         clockRow.add(cycleLabel);
         clockRow.add(stateLabel);
@@ -96,6 +100,7 @@ public class GlobalPanel extends JPanel {
         clockRow.add(new JLabel("  Duración del ciclo (ms):"));
         clockRow.add(speedField);
         clockRow.add(speedButton);
+        clockRow.add(backButton);
 
         JPanel createRow = new JPanel(new FlowLayout(FlowLayout.LEFT));
         createRow.add(processButton);
@@ -131,9 +136,9 @@ public class GlobalPanel extends JPanel {
 
     private void confirmStop() {
         int answer = JOptionPane.showConfirmDialog(this,
-                "Finalizar es definitivo: el reloj no se puede reiniciar en esta ventana.\n"
-                + "Los resultados quedan visibles. Para otra simulación hay que  "
-                + "volver a la configuración. ¿Finalizar?",
+                 "Finalizar es definitivo: el reloj no se puede reiniciar en esta ventana.\n"
+                + "Los resultados quedan visibles en las pestañas. Para otra simulación,\n"
+                + "use \"Volver a la configuración\". ¿Finalizar?",
                 "Finalizar simulación", JOptionPane.YES_NO_OPTION);
         if (answer == JOptionPane.YES_OPTION) {
             cluster.stop();
@@ -141,6 +146,28 @@ public class GlobalPanel extends JPanel {
         }
     }
 
+    
+    // MainFrame decide qué hacer al volver (cerrar esta ventana y abrir la configuración)
+    public void setOnBackToConfig(Runnable action) {
+        this.onBackToConfig = action;
+    }
+
+    private void confirmBack() {
+        if (onBackToConfig == null) {
+            return;
+        }
+        if (state == ClockState.EN_EJECUCION || state == ClockState.EN_PAUSA) {
+            int answer = JOptionPane.showConfirmDialog(this,
+                    "La simulación actual se detendrá y sus resultados se perderán.\n"
+                    + "¿Volver a la configuración?",
+                    "Volver a la configuración", JOptionPane.YES_NO_OPTION);
+            if (answer != JOptionPane.YES_OPTION) {
+                return;
+            }
+        }
+        onBackToConfig.run();
+    }
+    
     // La duración se puede cambiar con el reloj corriendo (GlobalClock.cycleDurationMs es volatile)
     private void applySpeed() {
         int ms;
