@@ -1,0 +1,318 @@
+@startuml clases_avilaos
+' ÁvilaOS — Diagrama de clases (núcleo del simulador)
+' Fuente editable (PlantUML). Generar imagen:
+'   java -DPLANTUML_LIMIT_SIZE=16384 -jar plantuml.jar -charset UTF-8 clases_avilaos.puml
+
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 12
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 25
+skinparam ranksep 45
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #444444
+  ArrowColor #333333
+}
+skinparam package {
+  BorderColor #7A9CC6
+  FontStyle bold
+}
+hide empty members
+
+title ÁvilaOS — Diagrama de clases (núcleo del simulador)
+
+package "system" {
+  class Cluster <<final>> {
+    - computers : Computer[]
+    - clock : GlobalClock
+    - buffers : CustomLinkedList<BoundedBuffer>
+    - networkLatency : int
+    + createBuffer(id, capacity, host) : BoundedBuffer
+    + submit(p : ProcessControlBlock)
+    + pickComputerAutomatically(memory) : int
+    + start() / pause() / resume() / stop()
+    - routeWakeUp(p, cycle)
+  }
+  class Computer {
+    - id : int
+    + onTick(cycle)
+    + submit(p)
+  }
+}
+
+package "hardware" {
+  interface ClockListener <<interface>> {
+    + onTick(cycle : int)
+  }
+  class GlobalClock <<final>> {
+    - workers : ClockWorker[]
+    - tickDone : Semaphore
+    - cycleDurationMs : int
+    + start() / stop() / pause() / resume()
+    + setCycleDurationMs(ms)
+    - tick()
+  }
+  class ClockWorker <<final>> {
+    - tickStart : Semaphore
+    ~ startTick(cycle)
+    + run()
+  }
+  class CPU {
+    - running : ProcessControlBlock
+    - mode : CPUMode
+    - quantumUsed : int
+    + dispatch(p, cycle)
+    + release() : ProcessControlBlock
+    + onTick(cycle)
+    + executeKernelInstruction()
+    + executeKernelOverhead()
+  }
+  class RAM {
+    - capacity : int
+    - used : int
+    + allocate(amount) : boolean
+    + free(amount)
+  }
+  class IODevice {
+    - reason : BlockReason
+    - inService : CustomLinkedList<PCB>
+    + startService(p, cycles)
+    + onTick(cycle)
+    + drainCompleted() : PCB[]
+    + cancel(p) : boolean
+  }
+}
+
+package "kernel" {
+  class Kernel {
+    - lock : Semaphore
+    - newQueue : CustomQueue<PCB>
+    - readyQueue : CustomLinkedList<PCB>
+    - blockedList : CustomLinkedList<PCB>
+    - terminatedList : CustomLinkedList<PCB>
+    - wakeUpMailbox : CustomQueue<PendingWakeUp>
+    - networkLatency : int
+    + submit(p)
+    + hostBuffer(b)
+    + runCycle(cycle)
+    + deliverWakeUp(p, cycle)
+    + setSchedulingPolicy(policy, quantum)
+    - admitNewProcesses()
+    - scheduleIfNeeded()
+    - executeSystemCall(p, instruction)
+    - releaseSyncResources(p)
+  }
+  interface WakeUpRouter <<interface>> {
+    + deliverWakeUp(p, cycle)
+  }
+  interface EventLogger <<interface>> {
+    + log(cycle, computerId, message)
+  }
+}
+
+package "scheduling" {
+  interface SchedulingAlgorithm <<interface>> {
+    + getPolicy() : SchedulingPolicy
+    + selectNextIndex(ready) : int
+    + shouldPreempt(running, ready, quantumUsed) : boolean
+  }
+  class FCFSScheduler
+  class EDFScheduler
+  class RoundRobinScheduler {
+    - quantum : int
+  }
+  class PreemptivePriorityScheduler
+  class SchedulerFactory <<final>> {
+    + {static} create(policy, quantum) : SchedulingAlgorithm
+  }
+}
+
+package "model" {
+  class ProcessControlBlock {
+    - id : int
+    - name : String
+    - assignedComputerId : int
+    - state : ProcessState
+    - type : ProcessType
+    - priority : int
+    - memoryRequired : int
+    - deadline : int
+    - remainingTime : int
+    - blockReason : BlockReason
+    + {static} createProducer(...) : PCB
+    + {static} createConsumer(...) : PCB
+    + currentInstruction() : MicroInstruction
+    + executeInstruction()
+    + tickDeadline() : boolean
+    + blockFor(reason, cycles)
+  }
+  class ThreadControlBlock {
+    - programCounter : int
+    - memoryAddressRegister : int
+    + advance()
+  }
+  class ProcessIdGenerator <<final>> {
+    - {static} MUTEX : Semaphore
+    + {static} nextId() : int
+  }
+}
+
+package "sync" {
+  class BoundedBuffer {
+    - slots : int[]
+    - in, out, count : int
+    - lock : Semaphore
+    + semWait(type, p) : boolean
+    + semSignal(type) : PCB
+    + add() : int
+    + remove() : int
+    + cancelWait(p) : boolean
+    + snapshot() : BufferStatus
+  }
+  class SimSemaphore {
+    - value : int
+    - waiting : CustomQueue<PCB>
+    + semWait(p) : boolean
+    + semSignal() : PCB
+    + cancelWait(p) : boolean
+  }
+}
+
+package "datastructures" {
+  class "CustomLinkedList<T>" as CustomLinkedList {
+    + add(e) / get(i) / removeAt(i)
+    + remove(e) / toArray()
+  }
+  class "CustomQueue<T>" as CustomQueue {
+    + enqueue(e) / dequeue() / peek()
+  }
+  class "Node<T>" as Node
+}
+
+package "enums" {
+  enum ProcessState {
+    NEW
+    READY
+    RUNNING
+    BLOCKED
+    TERMINATED
+  }
+  enum SchedulingPolicy {
+    FCFS
+    EDF
+    ROUND_ROBIN
+    PREEMPTIVE_PRIORITY
+  }
+  enum CPUMode {
+    USER_MODE
+    KERNEL_MODE
+  }
+  enum BlockReason {
+    NONE
+    IO_WAIT
+    NETWORK_LATENCY
+    SEMAPHORE_MUTEX
+    BUFFER_FULL
+    BUFFER_EMPTY
+  }
+  enum ProcessType {
+    CPU_BOUND
+    IO_BOUND
+    PRODUCER
+    CONSUMER
+  }
+  enum SemaphoreType {
+    MUTEX (s)
+    FULL (n)
+    EMPTY (e)
+  }
+  enum MicroInstruction {
+    USER_WORK
+    WAIT_EMPTY / WAIT_FULL / WAIT_MUTEX
+    ADD_ITEM / REMOVE_ITEM
+    SIGNAL_MUTEX / SIGNAL_FULL / SIGNAL_EMPTY
+  }
+}
+
+package "metrics" {
+  class MetricsCollector {
+    - history : double[][]
+    - lock : Semaphore
+    + onTick(cycle)
+    + computeGlobal() : GlobalMetrics
+    + getUtilizationSnapshot()
+  }
+}
+
+package "config / gui (capas superiores)" {
+  class ClusterFactory <<final>> {
+    + {static} build(config, logger) : Cluster
+  }
+  class MainFrame {
+    - refresh() : Timer de Swing, solo lee copias
+  }
+}
+
+' ---------------- capas superiores (solo conocen al Cluster)
+ClusterFactory -down-> Cluster : construye
+MainFrame -down-> Cluster : órdenes y lecturas
+MainFrame -down-> MetricsCollector
+MetricsCollector -down-> Cluster : lee copias
+
+' ---------------- sistema
+Cluster *-down- "2..*" Computer
+Cluster *-down- "1" GlobalClock
+Cluster o-down- "*" BoundedBuffer
+Cluster .down.> WakeUpRouter : provee routeWakeUp
+Computer *-down- "1" Kernel
+GlobalClock *-down- "1..*" ClockWorker
+ClockWorker -down-> ClockListener : 1 ciclo por tick
+
+' ---------------- kernel
+Kernel *-down- "1" CPU
+Kernel *-down- "1" RAM
+Kernel *-down- "2" IODevice : DMA y Red
+Kernel o-down- "1" SchedulingAlgorithm : política actual
+Kernel o-down- "*" BoundedBuffer : aloja
+Kernel -right-> WakeUpRouter
+Kernel -right-> EventLogger
+Kernel .down.> ProcessControlBlock : colas de PCB
+
+' ---------------- interfaces
+ClockListener <|.. Computer
+ClockListener <|.down. CPU
+ClockListener <|.down. IODevice
+ClockListener <|.. MetricsCollector
+SchedulingAlgorithm <|.down. FCFSScheduler
+SchedulingAlgorithm <|.down. EDFScheduler
+SchedulingAlgorithm <|.down. RoundRobinScheduler
+SchedulingAlgorithm <|.down. PreemptivePriorityScheduler
+SchedulerFactory .right.> SchedulingAlgorithm : crea
+
+' ---------------- modelo y sincronización
+BoundedBuffer *-down- "3" SimSemaphore : s, n, e
+ProcessControlBlock *-down- "1" ThreadControlBlock : 1:1
+ProcessControlBlock -right-> "0..1" BoundedBuffer : productor / consumidor
+ProcessControlBlock .down.> ProcessIdGenerator
+SimSemaphore .down.> CustomQueue : cola FIFO de PCB
+CustomLinkedList *-down- Node
+CustomQueue *-down- Node
+
+' ---------------- orden visual (flechas invisibles)
+ProcessControlBlock -[hidden]down- CustomLinkedList
+CustomLinkedList -[hidden]right- CustomQueue
+Node -[hidden]down- ProcessState
+
+legend right
+  <b>Notación</b>
+  ◆ composición · ◇ agregación · ▷ realiza interfaz · ⇢ dependencia
+  Se muestran solo atributos y métodos clave.
+  Los enums se usan en todo el modelo (estado, tipo, política,
+  modo de CPU, motivo de bloqueo, semáforo e instrucción).
+  La GUI y la configuración se comunican con el sistema
+  únicamente a través de <b>Cluster</b> (la GUI observa, no es el sistema).
+endlegend
+@enduml
