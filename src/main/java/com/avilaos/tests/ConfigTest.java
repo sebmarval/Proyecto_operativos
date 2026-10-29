@@ -124,7 +124,7 @@ public class ConfigTest {
         check("rechaza computador inexistente", rejects(c));
     }
 
-    private static void testBadFiles() throws IOException {
+        private static void testBadFiles() throws IOException {
         File bad = File.createTempFile("avilaos-bad", ".json");
         bad.deleteOnExit();
         try (FileOutputStream out = new FileOutputStream(bad)) {
@@ -132,6 +132,21 @@ public class ConfigTest {
         }
         check("rechaza JSON mal formado", loadFails(bad));
         check("rechaza archivo que no existe", loadFails(new File("no-existe-12345.json")));
+        check("rechaza archivo vacío", loadFails(tempFile("")));
+        check("rechaza un CSV / texto que no es JSON", loadFails(tempFile("nombre,ram\nPC0,256\n")));
+        check("rechaza un arreglo en vez de un objeto", loadFails(tempFile("[1, 2, 3]")));
+        check("rechaza texto en un campo numérico", loadFails(tempFile("{\"cycleDurationMs\": \"rapido\"}")));
+        check("rechaza elementos null en las listas", loadFails(tempFile(
+                "{\"computers\": [null, {\"ramCapacity\": 256, \"policy\": \"FCFS\", \"quantum\": 3}]}")));
+    }
+
+    private static File tempFile(String content) throws IOException {
+        File f = File.createTempFile("avilaos-bad", ".json");
+        f.deleteOnExit();
+        try (FileOutputStream out = new FileOutputStream(f)) {
+            out.write(content.getBytes("UTF-8"));
+        }
+        return f;
     }
 
     // ---------------------------------------------------------------- auxiliares
