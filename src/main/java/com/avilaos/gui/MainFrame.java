@@ -36,9 +36,12 @@ public class MainFrame extends JFrame {
      public MainFrame(Cluster cluster, JTextArea logArea) {
         this(cluster, logArea, null);
     }
-
+     
     // initialConfig: la configuración con la que se inició, para "Volver a la configuración"
     public MainFrame(Cluster cluster, JTextArea logArea, SimulationConfig initialConfig) {
+        super("ÁvilaOS - Simulación");
+        this.cluster = cluster;
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
 
         // el reloj llama al colector al final de cada ciclo, con todos los computadores quietos
         collector = new MetricsCollector(cluster);

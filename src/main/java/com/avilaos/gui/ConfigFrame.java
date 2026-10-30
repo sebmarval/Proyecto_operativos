@@ -147,7 +147,7 @@ public class ConfigFrame extends JFrame {
             JTextArea logArea = new JTextArea();
             logArea.setEditable(false);
             Cluster cluster = ClusterFactory.build(cfg, new GuiEventLogger(logArea));
-            new MainFrame(cluster, logArea).setVisible(true);
+            new MainFrame(cluster, logArea, cfg).setVisible(true);
             dispose();
         } catch (IllegalArgumentException ex) {
             showError(ex.getMessage());
